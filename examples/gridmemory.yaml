@@ -1,0 +1,61 @@
+# One online evolution generation on the built-in GridMemory environment.
+experiment_mode: exploratory
+purpose: gridmemory_example
+seeds: {dev: [42], holdout: []}
+lines: [M]
+gate:
+  rule: score_then_efficiency
+  alpha: 0.05
+  reference: parent
+  parent_remeasure: false
+  guards: {protocol_error_delta: 0.05, fallback_delta: 0.05}
+noise: {parent_repetitions: 1}
+generations: {max: 1}
+runtime:
+  mode: seatbelt
+  phase_caps: {LOG: 20, PLAN: 20}
+model:
+  provider: openai
+  name: ${oc.env:EVOVIM_EPISODE_MODEL}
+  base_url: ${oc.env:EVOVIM_EPISODE_BASE_URL,https://api.openai.com/v1}
+  api_key_env: OPENAI_API_KEY
+  reasoning_effort: none
+  max_completion_tokens: 4096
+  timeout: 180
+meta:
+  provider: codex
+  codex:
+    route: subscription
+    effort: high
+    binary: codex
+    workspace_root: ${oc.env:EVOVIM_META_WORKSPACE}
+  feedback: enhanced
+  revision_slot: true
+  self_improvement: notebook+toolkit+playbook
+  spatial_analysis: true
+  visual_analysis: true
+  evidence_images: true
+  effort: high
+  timeout_minutes: 30
+  preflight_timeout_minutes: 5
+  real_execution: {enabled: true}
+budget:
+  input_tokens: 1000000
+  output_tokens: 100000
+  amount: null
+review: {require_human: false}
+concurrency: {episode_workers: 1, meta_workers: 1, lineage_workers: 1}
+authorization:
+  mode: delegated_workload
+  enforcement: hard
+  max_units: 12
+  max_input_tokens: 1000000
+  max_output_tokens: 100000
+  monetary_cap: null
+holdout_after_lineage: false
+environments:
+  - family: gridmemory
+    adapter: gridmemory
+    task_id: default
+    line: M
+    max_steps: 8

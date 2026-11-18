@@ -1,0 +1,2 @@
+include examples/gridmemory.yaml
+include tests/test_campaign.py
