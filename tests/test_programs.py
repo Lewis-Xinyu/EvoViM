@@ -2,9 +2,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from visual_rsi.card_demo import run_card_demo
-from visual_rsi.host.bundle import verify_bundle
-from visual_rsi.programs import open_program, program_names
+from EvoViM.card_demo import run_card_demo
+from EvoViM.host.bundle import verify_bundle
+from EvoViM.programs import open_program, program_names
 
 
 class ReleasedProgramsTest(unittest.TestCase):

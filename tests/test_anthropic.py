@@ -11,9 +11,9 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from visual_rsi.host import transport
-from visual_rsi.host.model import ModelCall
-from visual_rsi.host.paid import Ledger, PaidModel
+from EvoViM.host import transport
+from EvoViM.host.model import ModelCall
+from EvoViM.host.paid import Ledger, PaidModel
 
 
 class Response(io.BytesIO):

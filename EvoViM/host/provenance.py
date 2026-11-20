@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def runtime_manifest(root: Path = ROOT) -> dict:
-    package = root / "visual_rsi"
+    package = root / "EvoViM"
     paths = {path for name in ("host", "adapters", "evolution", "meta", "inner")
              for path in (package / name).rglob("*.py")}
     for pattern in ("meta/*.md", "docs/*.md", "benchmarks/*.py", "benchmarks/tasks.json",

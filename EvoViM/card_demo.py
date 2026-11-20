@@ -5,10 +5,10 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from visual_rsi.adapters.base import PublicObs, StepResult
-from visual_rsi.host.episode import run_episode
-from visual_rsi.host.model import ModelCall, ModelReply
-from visual_rsi.programs import open_program
+from EvoViM.adapters.base import PublicObs, StepResult
+from EvoViM.host.episode import run_episode
+from EvoViM.host.model import ModelCall, ModelReply
+from EvoViM.programs import open_program
 
 
 class FourCardBoard:

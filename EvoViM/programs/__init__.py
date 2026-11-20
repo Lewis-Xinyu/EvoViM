@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from visual_rsi.host.repair import tree_hash
+from EvoViM.host.repair import tree_hash
 
 
 _ROOT = Path(__file__).resolve().parent

@@ -6,12 +6,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from visual_rsi.host import transport
-from visual_rsi.host.bundle import install_bundle, verify_bundle
-from visual_rsi.host.child.registry import ProtocolError, Registry, Tool, decode
-from visual_rsi.host.dto import ContainmentError
-from visual_rsi.host.protocol_text import host_decode
-from visual_rsi.host.repair import Promotion
+from EvoViM.host import transport
+from EvoViM.host.bundle import install_bundle, verify_bundle
+from EvoViM.host.child.registry import ProtocolError, Registry, Tool, decode
+from EvoViM.host.dto import ContainmentError
+from EvoViM.host.protocol_text import host_decode
+from EvoViM.host.repair import Promotion
 
 
 class RuntimeTest(unittest.TestCase):

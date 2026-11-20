@@ -16,13 +16,13 @@ dependencies = [
 ]
 
 [project.scripts]
-evovim = "visual_rsi.cli:main"
+evovim = "EvoViM.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["visual_rsi", "visual_rsi.*"]
+include = ["EvoViM", "EvoViM.*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-visual_rsi = ["docs/*.md", "meta/prompt_template.md"]
-"visual_rsi.programs" = ["catalog.json", "snapshots/*/*/*.py", "snapshots/*/*/*/*.py", "snapshots/*/*/source_manifest.json"]
-"visual_rsi.benchmarks" = ["tasks.json", "*/*.py", "*/*.js"]
+EvoViM = ["docs/*.md", "meta/prompt_template.md"]
+"EvoViM.programs" = ["catalog.json", "snapshots/*/*/*.py", "snapshots/*/*/*/*.py", "snapshots/*/*/source_manifest.json"]
+"EvoViM.benchmarks" = ["tasks.json", "*/*.py", "*/*.js"]

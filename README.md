@@ -9,7 +9,7 @@
 <p align="center">
   <a href="#quickstart">Quickstart</a> ·
   <a href="#reproduce-a-benchmark">Benchmarks</a> ·
-  <a href="visual_rsi/programs/catalog.json">Programs</a> ·
+  <a href="EvoViM/programs/catalog.json">Programs</a> ·
   <a href="#how-it-works">Method</a>
 </p>
 
@@ -64,7 +64,7 @@ evovim evaluate gpt/card-matching --model "$EVOVIM_EPISODE_MODEL" \
     --seed 47 --output runs/card-47
 ```
 
-Open `runs/card-47/summary.json`. Its `score` is the fraction of pairs cleared. The archived program cleared all 72 pairs on seed 47. A different model or service version can produce a different trajectory. [Per-seed reference scores](visual_rsi/programs/catalog.json)
+Open `runs/card-47/summary.json`. Its `score` is the fraction of pairs cleared. The archived program cleared all 72 pairs on seed 47. A different model or service version can produce a different trajectory. [Per-seed reference scores](EvoViM/programs/catalog.json)
 
 <details>
 <summary><strong>Reproduce the five-seed Card Matching mean</strong></summary>
@@ -102,7 +102,7 @@ Run `evovim programs` to list every `model/task` ID. Use `evovim export gpt/card
 | `haiku/` | Claude Haiku 5.5 | `ANTHROPIC_API_KEY` |
 | `qwen/` | Qwen3.8-27B | `OPENAI_API_KEY` for a compatible deployment |
 
-Each prefix has programs for `card-matching`, `dmv-hard`, `minecraft-gallery`, `poster-maze`, `tetris` and `pac-man`. Select a compatible service with `EVOVIM_EPISODE_BASE_URL`. GPT and Qwen use Chat Completions. Haiku uses Anthropic Messages. The task definitions give the episode horizon and the exact held-out seeds for each benchmark. [Environment setup](examples/benchmarks.md) · [Task definitions](visual_rsi/benchmarks/tasks.json)
+Each prefix has programs for `card-matching`, `dmv-hard`, `minecraft-gallery`, `poster-maze`, `tetris` and `pac-man`. Select a compatible service with `EVOVIM_EPISODE_BASE_URL`. GPT and Qwen use Chat Completions. Haiku uses Anthropic Messages. The task definitions give the episode horizon and the exact held-out seeds for each benchmark. [Environment setup](examples/benchmarks.md) · [Task definitions](EvoViM/benchmarks/tasks.json)
 
 ## How it works
 
@@ -130,11 +130,11 @@ evovim demo --bundle \
 <details>
 <summary>Use a released program with your own environment or model</summary>
 
-Supply an adapter for observations, actions and scoring, plus a model implementing `generate(call) -> ModelReply`. The standalone runner executes trusted program code in a subprocess. [Adapter interface](visual_rsi/adapters/base.py) · [Working example](visual_rsi/demo.py) · [Episode runner](visual_rsi/host/episode.py)
+Supply an adapter for observations, actions and scoring, plus a model implementing `generate(call) -> ModelReply`. The standalone runner executes trusted program code in a subprocess. [Adapter interface](EvoViM/adapters/base.py) · [Working example](EvoViM/demo.py) · [Episode runner](EvoViM/host/episode.py)
 
 ```python
-from visual_rsi.host.episode import run_episode
-from visual_rsi.programs import open_program
+from EvoViM.host.episode import run_episode
+from EvoViM.programs import open_program
 
 with open_program("gpt/card-matching") as program:
     result = run_episode(adapter, program, line="M", seed=47, model=model, archive="runs/custom")

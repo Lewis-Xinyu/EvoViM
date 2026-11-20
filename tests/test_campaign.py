@@ -9,10 +9,10 @@ from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
-from visual_rsi.evolution import codex_runner
-from visual_rsi.evolution.quick_evo import Run
-from visual_rsi.host import transport
-from visual_rsi.host.repair import Promotion
+from EvoViM.evolution import codex_runner
+from EvoViM.evolution.quick_evo import Run
+from EvoViM.host import transport
+from EvoViM.host.repair import Promotion
 
 
 def manifest(workspaces):

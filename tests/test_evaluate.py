@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from visual_rsi.cli import main
-from visual_rsi.host import transport
+from EvoViM.cli import main
+from EvoViM.host import transport
 
 
 class EvaluationTest(unittest.TestCase):

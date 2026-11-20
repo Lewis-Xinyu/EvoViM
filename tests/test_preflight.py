@@ -6,7 +6,7 @@ from subprocess import CompletedProcess
 from tempfile import TemporaryDirectory
 import unittest
 
-from visual_rsi.evolution.codex_runner import run_preflight
+from EvoViM.evolution.codex_runner import run_preflight
 
 
 class PreflightTest(unittest.TestCase):

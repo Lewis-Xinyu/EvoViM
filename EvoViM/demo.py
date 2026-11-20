@@ -5,9 +5,9 @@ from importlib.resources import files
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from visual_rsi.adapters.gridmemory import GridMemoryAdapter
-from visual_rsi.host.episode import run_episode
-from visual_rsi.host.model import ModelReply
+from EvoViM.adapters.gridmemory import GridMemoryAdapter
+from EvoViM.host.episode import run_episode
+from EvoViM.host.model import ModelReply
 
 
 class ScriptedModel:
@@ -32,7 +32,7 @@ def run(args) -> int:
             from .card_demo import run_card_demo
             result = run_card_demo(archive)
         else:
-            bundle = args.bundle or files("visual_rsi").joinpath("inner", "visual_memory")
+            bundle = args.bundle or files("EvoViM").joinpath("inner", "visual_memory")
             if not (bundle / "candidate.py").is_file():
                 raise ValueError(f"Missing candidate.py in {bundle}")
             result = run_episode(GridMemoryAdapter(max_steps=2), bundle, line="M", seed=0,
