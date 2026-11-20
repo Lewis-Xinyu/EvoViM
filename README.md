@@ -141,5 +141,3 @@ with open_program("gpt/card-matching") as program:
 ```
 
 </details>
-
-The starting memory scaffold derives from AutoMem commit `1987b8f6d202212ec3c0c78ab2a01ae02aca4e8b`. [Upstream AutoMem](https://github.com/autoLearnMem/AutoMem/tree/1987b8f6d202212ec3c0c78ab2a01ae02aca4e8b)
