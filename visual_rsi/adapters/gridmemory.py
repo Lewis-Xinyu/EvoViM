@@ -1,4 +1,4 @@
-"""Deterministic, offline-only grid environment used by tests and dry-run."""
+"""A seeded grid environment for running and evolving visual memory programs."""
 from __future__ import annotations
 
 import random
@@ -16,28 +16,24 @@ class GridMemoryAdapter:
     fallback_action = "Noop"
 
     def __init__(self, size: int = 7, max_steps: int = 32):
-        if size < 3 or size % 2 == 0:
-            raise ValueError("size must be an odd integer >= 3")
+        if size < 5 or size % 2 == 0:
+            raise ValueError("size must be an odd integer >= 5")
         self.size = size
+        if max_steps < 1:
+            raise ValueError("max_steps must be positive")
         self.max_steps = max_steps
-        self._rng = random.Random(0)
         self._step = 0
         self._player = (size // 2, size // 2)
         self._target = (size // 2, size // 2 - 2)
-        self._objects: dict[tuple[int, int], str] = {}
-        self._last_action: str | None = None
         self._visited: set[tuple[int, int]] = set()
 
     def reset(self, seed: int) -> None:
-        self._rng.seed(seed)
         self._step = 0
         self._player = (self.size // 2, self.size // 2)
         choices = [(r, c) for r in range(1, self.size - 1)
                    for c in range(1, self.size - 1)
                    if (r, c) != self._player]
-        self._target = self._rng.choice(choices)
-        self._objects = {self._target: "blue relic"}
-        self._last_action = None
+        self._target = random.Random(seed).choice(choices)
         self._visited = {self._player}
 
     def legal_actions(self) -> list[str]:
@@ -60,8 +56,8 @@ class GridMemoryAdapter:
             for c in range(max(0, pc - 1), min(self.size, pc + 2)):
                 if (r, c) == self._player:
                     cells.append("you")
-                elif (r, c) in self._objects:
-                    cells.append(self._objects[(r, c)])
+                elif (r, c) == self._target:
+                    cells.append("blue relic")
                 else:
                     cells.append("empty")
             rows.append(" / ".join(cells))
@@ -76,7 +72,7 @@ class GridMemoryAdapter:
                 fill = "#e9eef5" if (r, c) in self._visited else "#ffffff"
                 if (r, c) == self._player:
                     fill = "#ef8354"
-                elif (r, c) in self._objects:
+                elif (r, c) == self._target:
                     fill = "#356ae6"
                 box = (c * cell, r * cell, (c + 1) * cell - 1, (r + 1) * cell - 1)
                 draw.rectangle(box, fill=fill, outline="#8593a6")
@@ -84,10 +80,7 @@ class GridMemoryAdapter:
 
     def observe(self) -> PublicObs:
         nearby = ", ".join(self._visible())
-        target_visible = self._target in {
-            (r, c) for r in range(max(0, self._player[0] - 1), min(self.size, self._player[0] + 2))
-            for c in range(max(0, self._player[1] - 1), min(self.size, self._player[1] + 2))
-        }
+        target_visible = all(abs(a - b) <= 1 for a, b in zip(self._target, self._player))
         text = {
             "long_term_context": "A deterministic grid has walls at its boundary.",
             "short_term_context": (
@@ -108,17 +101,17 @@ class GridMemoryAdapter:
             if 0 < candidate[0] < self.size - 1 and 0 < candidate[1] < self.size - 1:
                 self._player = candidate
         self._step += 1
-        self._last_action = action
         self._visited.add(self._player)
         done = action == "Task Done" or self._step >= self.max_steps
         success = self._player == self._target
         private = {"target": self._target, "player": self._player, "success": success}
         reward = 1.0 if success else 0.0
         return StepResult(self.observe(), done, reward, private,
-                          terminated=action == "Task Done", truncated=self._step >= self.max_steps)
+                          terminated=action == "Task Done", truncated=action != "Task Done" and self._step >= self.max_steps,
+                          metrics={"success": success})
 
     def score(self, private_record: Any) -> float:
         return 1.0 if isinstance(private_record, dict) and private_record.get("success") else 0.0
 
     def close(self) -> None:
-        return None
+        """GridMemory holds no external resources."""

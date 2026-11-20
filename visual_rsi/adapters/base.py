@@ -1,6 +1,6 @@
 """Public adapter contracts. Private score state never crosses into a candidate."""
 from dataclasses import dataclass
-from typing import Any, Protocol, Tuple
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,7 @@ class StepResult:
 class EnvAdapter(Protocol):
     name: str
     has_image: bool
-    public_text_fields: Tuple[str, ...]
+    public_text_fields: tuple[str, ...]
     max_steps: int
     fallback_action: str
 

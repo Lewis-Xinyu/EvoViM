@@ -17,7 +17,7 @@ import sys
 import tempfile
 
 
-_stdlib = set(getattr(sys, "stdlib_module_names", ()))
+_stdlib = set(sys.stdlib_module_names)
 ALLOWED_IMPORT_ROOTS = _stdlib | {
     "numpy", "scipy", "PIL", "omegaconf", "agents", "prompt_builder", "registry",
     "client", "visual_adapter", "experiments",
@@ -106,8 +106,7 @@ def _relative_module(path: Path, node: ast.ImportFrom, root: Path) -> str | None
     return ".".join(base)
 
 
-def _static_findings(root: Path, *, parent: Path, line: str,
-                     forbidden_literals: tuple[str, ...]) -> list[str]:
+def _static_findings(root: Path, parent: Path) -> list[str]:
     findings: list[str] = []
     local_modules = _local_modules(root)
     for path in sorted(Path(root).rglob("*.py")):
@@ -148,8 +147,6 @@ def _static_findings(root: Path, *, parent: Path, line: str,
                 if node.func.attr in {"system", "popen"} and node_lines & added:
                     findings.append(f"forbidden process call: {node.func.attr}")
         changed_text = "\n".join(source.splitlines()[line_no - 1] for line_no in sorted(added))
-        # Environment names and visual terminology are not authority.  The
-        # host's DTO and visual-channel boundaries enforce actual modality.
         if re.search(r"Path\(\s*['\"]/(?!/)", changed_text):
             findings.append(f"absolute filesystem path in {path.name}")
     return sorted(set(findings))
@@ -168,18 +165,12 @@ def _merge(parent: Path, candidate: Path, destination: Path) -> None:
 
 def review_candidate(parent: Path, candidate: Path, *, line: str,
                      forbidden_literals: tuple[str, ...] = ()) -> dict:
-    # ``forbidden_literals`` is accepted and ignored.  A1 removed the purely
-    # lexical environment-name rejection: upstream AutoMem evolves per-game
-    # scaffolds, so a game name in source or comments is not authority.  The
-    # parameter survives only so the regression tests can keep asserting that
-    # passing literals never rejects a candidate; real privilege, answer and
-    # modality violations stay with the host isolation boundaries.
+    # Keep the deprecated keyword for callers that supply it.
     parent, candidate = Path(parent), Path(candidate)
-    with tempfile.TemporaryDirectory(prefix="meta-v8-review-") as directory:
+    with tempfile.TemporaryDirectory(prefix="evovim-review-") as directory:
         merged = Path(directory) / "merged"
         _merge(parent, candidate, merged)
-        findings = _static_findings(merged, parent=parent, line=line,
-                                    forbidden_literals=forbidden_literals)
+        findings = _static_findings(merged, parent)
         warnings = []
         for path in Path(candidate).rglob("*.py"):
             source = path.read_text(encoding="utf-8")

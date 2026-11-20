@@ -7,17 +7,11 @@ import re
 from typing import Mapping
 
 
-MARKED = ("MODALITY_T", "MODALITY_V", "MODALITY_M", "SPATIAL_ANALYSIS", "VISUAL_ANALYSIS", "META_MEMORY",
-          "PLAYBOOK", "PLAYBOOK_EDIT", "REVISION_SLOT", "FEEDBACK_ENHANCED")
-
-
 def _block(text: str, name: str, keep: bool) -> str:
     pattern = re.compile(r"<!-- " + re.escape(name) + r"_BEGIN -->.*?<!-- " + re.escape(name) + r"_END -->\n?", re.S)
-    matches = list(pattern.finditer(text))
-    if not matches:
+    if not pattern.search(text):
         raise ValueError("missing prompt marker block: " + name)
-    replacement = lambda match: match.group(0) if keep else ""
-    return pattern.sub(replacement, text)
+    return text if keep else pattern.sub("", text)
 
 
 def render(template: str | Path, values: Mapping[str, object], *, line: str, spatial: bool,
@@ -25,8 +19,8 @@ def render(template: str | Path, values: Mapping[str, object], *, line: str, spa
            visual: bool = False) -> tuple[str, dict]:
     text = Path(template).read_text(encoding="utf-8") if isinstance(template, Path) else template
     hard_start, hard_end = "<!-- HARD_CONSTRAINTS_BEGIN -->", "<!-- HARD_CONSTRAINTS_END -->"
-    left, right = text.split(hard_start, 1)[1].split(hard_end, 1)
-    hard_hash = hashlib.sha256((left + right).encode()).hexdigest()
+    constraints = text.split(hard_start, 1)[1].split(hard_end, 1)[0]
+    hard_hash = hashlib.sha256(constraints.encode()).hexdigest()
     for modality in ("T", "V", "M"):
         text = _block(text, "MODALITY_" + modality, modality == line)
     text = _block(text, "SPATIAL_ANALYSIS", spatial)
@@ -55,25 +49,6 @@ def render(template: str | Path, values: Mapping[str, object], *, line: str, spa
     text = re.sub(r"<!-- [A-Z_]+_(?:BEGIN|END) -->\n?", "", text)
     return text, {"hard_constraints_sha256": hard_hash, "line": line, "self_improvement": self_improvement,
                   "feedback": feedback, "visual_analysis": bool(visual)}
-
-
-def symmetry_check(rendered: Mapping[str, str]) -> dict:
-    def remove_modality(text: str) -> str:
-        for line in ("T", "V", "M"):
-            text = re.sub(r"## Modality: line " + line + r".*?(?=\n## |\Z)", "", text, flags=re.S)
-            text = text.replace("line " + line + ", generation", "line X, generation")
-        return text
-    base = None
-    equal = True
-    digests = {}
-    for line, text in rendered.items():
-        normal = remove_modality(text)
-        digests[line] = hashlib.sha256(normal.encode()).hexdigest()
-        if base is None:
-            base = normal
-        else:
-            equal = equal and normal == base
-    return {"equal_after_modality_removal": equal, "sha256": digests}
 
 
 def sanitize_playbook(text: str, *, max_words: int | None = None) -> tuple[str, list[str]]:

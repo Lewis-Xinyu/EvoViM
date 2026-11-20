@@ -172,26 +172,27 @@ def _action_allowed(payload: str, action_spec: list[str] | dict[str, Any]) -> bo
     return False
 
 
-def decode(text: str, phase: str, registry: Registry,
-           actions: list[str] | dict[str, Any]) -> tuple[str, dict[str, Any]]:
+def parse_command(text: str, phase: str, actions: list[str] | dict[str, Any]) -> tuple[str, str]:
+    """Read one command and check the phase and adapter action contract."""
     if text.strip() == "<|DONE|>":
         if phase != "LOG":
             raise ProtocolError("DONE only available in LOG")
-        return "DONE", {}
+        return "DONE", ""
     matches = list(COMMAND_RE.finditer(text))
     if len(matches) != 1:
         raise ProtocolError("exactly one complete command required")
     name, payload = matches[0].group(1), matches[0].group(2).strip()
     if "<|" in payload:
         raise ProtocolError("nested command")
-    if name == "ACTION":
-        if phase != "PLAN" or not _action_allowed(payload, actions):
-            raise ProtocolError("invalid/phase-forbidden ACTION")
-        return name, {"action": payload}
-    tool = registry.tools.get(name)
-    if tool is None or phase not in tool.phases:
-        raise ProtocolError("unknown/phase-forbidden tool")
-    if tool.legacy:
+    if name == "DONE":
+        raise ProtocolError("DONE must appear alone")
+    if name == "ACTION" and (phase != "PLAN" or not _action_allowed(payload, actions)):
+        raise ProtocolError("invalid/phase-forbidden ACTION")
+    return name, payload
+
+
+def parse_arguments(name: str, payload: str, legacy: bool) -> dict[str, Any]:
+    if legacy:
         keys = LEGACY_KEYS[name]
         parts = payload.split("|", len(keys) - 1)
         if len(parts) != len(keys):
@@ -202,11 +203,24 @@ def decode(text: str, phase: str, registry: Registry,
                 args["n"] = int(args["n"])
             except ValueError as exc:
                 raise ProtocolError("TAIL n must be integer") from exc
-        return name, args
+        return args
     try:
         args = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise ProtocolError("new tool arguments must be a JSON object") from exc
     if not isinstance(args, dict):
         raise ProtocolError("new tool arguments must be a JSON object")
-    return name, args
+    return args
+
+
+def decode(text: str, phase: str, registry: Registry,
+           actions: list[str] | dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    name, payload = parse_command(text, phase, actions)
+    if name == "DONE":
+        return name, {}
+    if name == "ACTION":
+        return name, {"action": payload}
+    tool = registry.tools.get(name)
+    if tool is None or phase not in tool.phases:
+        raise ProtocolError("unknown/phase-forbidden tool")
+    return name, parse_arguments(name, payload, tool.legacy)

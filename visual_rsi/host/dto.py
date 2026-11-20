@@ -17,6 +17,11 @@ class Violation(ContainmentError):
     """The candidate broke a host rule (phase order, caps, action commitment, modality)."""
 
 
+def validate_frame_id(frame_id: str) -> None:
+    if not isinstance(frame_id, str) or not re.fullmatch(r"f\d{5}", frame_id):
+        raise ContainmentError("invalid frame id")
+
+
 def validate_public_obs(raw: dict[str, Any], allowed_fields: Iterable[str], *, line: str) -> dict[str, Any]:
     if not isinstance(raw, dict) or set(raw) - {"text", "image", "frame_id"}:
         raise ContainmentError("observation contains non-public fields")
@@ -34,7 +39,7 @@ def validate_public_obs(raw: dict[str, Any], allowed_fields: Iterable[str], *, l
         raise ContainmentError("V candidate cannot receive pixels")
     if line == "M" and image is not None and not hasattr(image, "convert"):
         raise ContainmentError("M image must be a PIL-compatible image")
-    if frame_id is not None and (not isinstance(frame_id, str) or not re.fullmatch(r"f\d{5}", frame_id)):
-        raise ContainmentError("invalid frame id")
+    if frame_id is not None:
+        validate_frame_id(frame_id)
     return {"text": dict(text), **({"image": image} if image is not None else {}),
             **({"frame_id": frame_id} if frame_id is not None else {})}

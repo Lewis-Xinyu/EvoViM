@@ -6,15 +6,18 @@ import hashlib
 import json
 from pathlib import Path
 
+from .repair import atomic_json
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def runtime_manifest(root: Path = ROOT) -> dict:
-    paths = set()
-    for name in ("host", "adapters", "evolution", "meta", "inner"):
-        paths.update((root / "visual_rsi" / name).rglob("*.py"))
-    paths.update((root / "visual_rsi" / "meta").glob("*.md"))
-    paths.update((root / "visual_rsi" / "docs").glob("*.md"))
+    package = root / "visual_rsi"
+    paths = {path for name in ("host", "adapters", "evolution", "meta", "inner")
+             for path in (package / name).rglob("*.py")}
+    for pattern in ("meta/*.md", "docs/*.md", "benchmarks/*.py", "benchmarks/tasks.json",
+                    "benchmarks/*/*.py", "benchmarks/*/*.js"):
+        paths.update(package.glob(pattern))
     files = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
              for p in sorted(paths) if p.is_file()}
     digest = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
@@ -46,5 +49,5 @@ def bind_runtime(run_dir: Path) -> dict:
                              if path.relative_to(run_dir).parts[0] not in {"preflight", "preflight_staging"})
             if any(prior_results):
                 raise RuntimeError("existing results have no runtime manifest; keep them as historical evidence and use a new run directory")
-            path.write_text(json.dumps(current, sort_keys=True, indent=2) + "\n")
+            atomic_json(path, current)
     return current

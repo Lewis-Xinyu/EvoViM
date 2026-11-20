@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import shutil
 import sys
+from tempfile import TemporaryDirectory
 
 from .dto import ContainmentError
 
@@ -16,23 +17,31 @@ def install_bundle(destination: Path, parent: Path, files: dict[str, str] | None
     if destination.exists():
         raise FileExistsError(destination)
     parent = Path(parent).resolve()
-    shutil.copytree(parent, destination, ignore=shutil.ignore_patterns("__pycache__", "source_manifest.json"))
-    destination.chmod(0o755)  # the parent may be a read-only workspace input
-    for path in destination.rglob("*"):
-        if not path.is_symlink():
+    if destination.is_relative_to(parent):
+        raise ValueError("install the bundle outside its parent source directory")
+    verify_bundle(parent)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=destination.parent) as temp:
+        staged = Path(temp) / "bundle"
+        shutil.copytree(parent, staged, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store",
+                                                                      "source_manifest.json"))
+        # The source may be a read-only revision workspace.
+        staged.chmod(0o755)
+        for path in staged.rglob("*"):
             path.chmod(0o755 if path.is_dir() else 0o644)
-    for name, content in (files or {}).items():
-        if not isinstance(name, str) or name.startswith("/") or not isinstance(content, str):
-            raise ValueError("invalid bundle override")
-        target = (destination / name).resolve()
-        if not target.is_relative_to(destination) or not name.endswith(".py"):
-            raise ValueError("candidate file outside source bundle")
-        compile(content, name, "exec")  # an installation check, not a security boundary
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-    manifest = {str(path.relative_to(destination)): hashlib.sha256(path.read_bytes()).hexdigest()
-                for path in sorted(destination.rglob("*.py"))}
-    (destination / "source_manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+        for name, content in (files or {}).items():
+            if not isinstance(name, str) or Path(name).is_absolute() or not isinstance(content, str):
+                raise ValueError("invalid bundle override")
+            target = (staged / name).resolve()
+            if not target.is_relative_to(staged) or target.suffix != ".py":
+                raise ValueError("candidate file outside source bundle")
+            compile(content, name, "exec")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        manifest = verify_bundle(staged)
+        (staged / "source_manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n",
+                                                      encoding="utf-8")
+        staged.rename(destination)
     return destination
 
 
@@ -51,10 +60,12 @@ def overlay_files(directory: Path) -> dict[str, str]:
 
 def verify_bundle(bundle: Path) -> dict[str, str]:
     bundle = Path(bundle).resolve()
-    actual = {str(path.relative_to(bundle)): hashlib.sha256(path.read_bytes()).hexdigest()
-              for path in sorted(bundle.rglob("*.py")) if "__pycache__" not in path.parts}
+    if not (bundle / "candidate.py").is_file():
+        raise ContainmentError("bundle is missing candidate.py")
     if any(path.is_symlink() for path in bundle.rglob("*")):
         raise ContainmentError("bundle contains a symlink")
+    actual = {str(path.relative_to(bundle)): hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in sorted(bundle.rglob("*.py")) if "__pycache__" not in path.parts}
     manifest_path = bundle / "source_manifest.json"
     if not manifest_path.exists():
         return actual
@@ -71,7 +82,7 @@ def python_paths() -> dict[str, Path]:
 
 
 def profile(bundle: Path, scratch: Path, runtime: Path) -> str:
-    """Seatbelt profile ported from r2: deny by default, read only code and libraries, write only scratch."""
+    """Allow the worker to read its code and libraries and write inside scratch."""
     paths = python_paths()
     quote = lambda value: json.dumps(str(value), ensure_ascii=False)
     read_roots = [Path(bundle).resolve(), Path(runtime).resolve(), paths["prefix"], paths["base_prefix"],
@@ -79,7 +90,12 @@ def profile(bundle: Path, scratch: Path, runtime: Path) -> str:
                   Path("/Library/Apple/System/Library")]
     grants = "\n".join(f"(allow file-read* file-map-executable (subpath {quote(root)}))"
                        for root in dict.fromkeys(read_roots))
-    execs = " ".join(f"(literal {quote(p)})" for p in dict.fromkeys([paths["resolved"], paths["executable"]]))
+    executables = [paths["resolved"], paths["executable"]]
+    # A framework build starts through a launcher that execs Python.app.
+    framework_python = paths["base_prefix"] / "Resources/Python.app/Contents/MacOS/Python"
+    if framework_python.is_file():
+        executables.append(framework_python.resolve())
+    execs = " ".join(f"(literal {quote(p)})" for p in dict.fromkeys(executables))
     return "\n".join([
         "(version 1)",
         "(deny default)",

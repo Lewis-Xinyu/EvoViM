@@ -1,0 +1,317 @@
+{
+  "gpt/card-matching": {
+    "model": "GPT-6.1 Sol",
+    "task_id": "matching_pairs/noise_12x12",
+    "source_run": "formal_rng12_ours_sol_20261013b",
+    "family": "rng12_noise_m",
+    "selected": "g3_fresh",
+    "version_sha256": "5eb87951c00992d6d81fee00aef564959dba0af1bad2864283cba8365ec6909a",
+    "heldout_scores": {
+      "47": 1.0,
+      "48": 1.0,
+      "49": 1.0,
+      "52": 1.0,
+      "53": 1.0
+    }
+  },
+  "gpt/dmv-hard": {
+    "model": "GPT-6.1 Sol",
+    "task_id": "dmv_hard2/j5_v20_p6",
+    "source_run": "formal_memenv_ours_sol_20261013b",
+    "family": "dmv2_j5v20_m",
+    "selected": "g3_fresh",
+    "version_sha256": "d162814eb6357943e20efb128a59ee3bc444a5ac8608342e34c5b55c3d19a124",
+    "heldout_scores": {
+      "43": 1.0,
+      "44": 1.0,
+      "45": 0.9583333333333334,
+      "47": 1.0,
+      "48": 1.0,
+      "49": 1.0,
+      "52": 1.0,
+      "53": 0.875,
+      "54": 1.0,
+      "55": 0.9166666666666666
+    }
+  },
+  "gpt/minecraft-gallery": {
+    "model": "GPT-6.1 Sol",
+    "task_id": "mc_gallery/g8_q8_c12p3",
+    "source_run": "formal_memenv_ours_sol_20261013b",
+    "family": "mc12_gallery_m",
+    "selected": "g1_fresh",
+    "version_sha256": "fd38aa8796e9750f0e8a025e4220549c8d6c2938b3f7f7992f1d422f80073d54",
+    "heldout_scores": {
+      "43": 0.5,
+      "44": 0.5,
+      "45": 0.625,
+      "47": 0.75,
+      "48": 0.625,
+      "49": 0.75,
+      "52": 0.5,
+      "53": 0.75,
+      "54": 0.625,
+      "55": 0.875
+    }
+  },
+  "gpt/pac-man": {
+    "model": "GPT-6.1 Sol",
+    "task_id": "23_pacman/23_05",
+    "source_run": "formal_arcade_ours_sol_20261013b",
+    "family": "gw_pacman_m",
+    "selected": "g2_fresh",
+    "version_sha256": "42b462825c9ff59bfd1166c2839de889f210eb2fd549c783d8c5f738db07355b",
+    "heldout_scores": {
+      "43": 0.324,
+      "44": 0.472,
+      "45": 0.38,
+      "47": 0.34,
+      "48": 0.412
+    }
+  },
+  "gpt/poster-maze": {
+    "model": "GPT-6.1 Sol",
+    "task_id": "poster_maze/n9_k16_q8_g6p3",
+    "source_run": "formal_maze_ours_sol_20261017",
+    "family": "maze_poster_m",
+    "selected": "g2_fresh",
+    "version_sha256": "fb641528a5f1302c007ce6b5555e078212809dc66469f5a512f101fdfb338619",
+    "heldout_scores": {
+      "43": 0.75,
+      "44": 0.375,
+      "45": 1.0,
+      "47": 0.625,
+      "48": 1.0,
+      "49": 1.0,
+      "52": 0.375,
+      "53": 0.25,
+      "54": 0.875,
+      "55": 0.375
+    }
+  },
+  "gpt/tetris": {
+    "model": "GPT-6.1 Sol",
+    "task_id": "29_tetris/29_05",
+    "source_run": "formal_arcade_ours_sol_20261013b",
+    "family": "gw_tetris_m",
+    "selected": "g1_fresh",
+    "version_sha256": "d9ef9a596efa9b4d534e660db7315f820ab29e271cb3bf0648cb9b1be1d100d1",
+    "heldout_scores": {
+      "43": 0.5233333333333333,
+      "44": 0.49333333333333335,
+      "45": 0.41333333333333333,
+      "47": 0.5116666666666667,
+      "48": 0.34833333333333333
+    }
+  },
+  "haiku/card-matching": {
+    "model": "Claude Haiku 5.5",
+    "task_id": "matching_pairs/noise_12x12",
+    "source_run": "haiku_rng12_ours_20261017b",
+    "family": "rng12_noise_m_h",
+    "selected": "g3_revision",
+    "version_sha256": "569a27b5448c1829b613f85831032029a1655412b743f90fcdcf40943e6a2771",
+    "heldout_scores": {
+      "47": 1.0,
+      "48": 1.0,
+      "49": 1.0,
+      "52": 1.0,
+      "53": 1.0
+    }
+  },
+  "haiku/dmv-hard": {
+    "model": "Claude Haiku 5.5",
+    "task_id": "dmv_hard2/j5_v20_p6",
+    "source_run": "haiku_dmv_ours_20261017",
+    "family": "dmv2_j5v20_m_h",
+    "selected": "g3_fresh",
+    "version_sha256": "2f9db34af633a30f80b53c1091ef650a0d813a39a521afa3736840f22cb463be",
+    "heldout_scores": {
+      "43": 0.875,
+      "44": 0.75,
+      "45": 0.6666666666666666,
+      "47": 0.8333333333333334,
+      "48": 0.8333333333333334,
+      "49": 0.875,
+      "52": 0.9166666666666666,
+      "53": 0.75,
+      "54": 0.625,
+      "55": 0.5833333333333334
+    }
+  },
+  "haiku/minecraft-gallery": {
+    "model": "Claude Haiku 5.5",
+    "task_id": "mc_gallery/g8_q8_c12p3",
+    "source_run": "haiku_mc_ours_20261017",
+    "family": "mc12_gallery_m_h",
+    "selected": "g2_fresh",
+    "version_sha256": "8d5beb98b2220bc3d0e0f222e7ef3950a6db8d6f47ed7bd7b02bc98477606657",
+    "heldout_scores": {
+      "43": 1.0,
+      "44": 1.0,
+      "45": 1.0,
+      "47": 1.0,
+      "48": 1.0,
+      "49": 1.0,
+      "52": 1.0,
+      "53": 1.0,
+      "54": 1.0,
+      "55": 0.875
+    }
+  },
+  "haiku/pac-man": {
+    "model": "Claude Haiku 5.5",
+    "task_id": "23_pacman/23_05",
+    "source_run": "haiku_pacman_ours_20261017",
+    "family": "gw_pacman_m_h",
+    "selected": "g3_fresh",
+    "version_sha256": "ef48cef37f3debb83233b4d288f82abc69e585fff68bd0df21cbe9c72bffff90",
+    "heldout_scores": {
+      "43": 0.572,
+      "44": 1.0,
+      "45": 0.512,
+      "47": 0.572,
+      "48": 0.4
+    }
+  },
+  "haiku/poster-maze": {
+    "model": "Claude Haiku 5.5",
+    "task_id": "poster_maze/n9_k16_q8_g6p3",
+    "source_run": "haiku_maze_ours_20261017",
+    "family": "maze_poster_m_h",
+    "selected": "g3_fresh",
+    "version_sha256": "b8e88f427393ae332c0345ff64c4b441eb25d4899de5ae508cfb6e6da97bf1c2",
+    "heldout_scores": {
+      "43": 0.375,
+      "44": 0.25,
+      "45": 0.75,
+      "47": 0.5,
+      "48": 0.875,
+      "49": 0.75,
+      "52": 0.25,
+      "53": 0.25,
+      "54": 0.75,
+      "55": 0.25
+    }
+  },
+  "haiku/tetris": {
+    "model": "Claude Haiku 5.5",
+    "task_id": "29_tetris/29_05",
+    "source_run": "haiku_tetris_ours_20261017",
+    "family": "gw_tetris_m_h",
+    "selected": "g3_fresh",
+    "version_sha256": "eef781237a83b08a54924ca3e51ff27cbc01ad694dc294ef1cb4731f137fe9e3",
+    "heldout_scores": {
+      "43": 0.5066666666666667,
+      "44": 0.5833333333333334,
+      "45": 1.0,
+      "47": 1.0,
+      "48": 0.66
+    }
+  },
+  "qwen/card-matching": {
+    "model": "Qwen3.8-27B",
+    "task_id": "matching_pairs/noise_12x12",
+    "source_run": "local_rng12_ours_20261019",
+    "family": "rng12_noise_m_q",
+    "selected": "g3_fresh",
+    "version_sha256": "a005b11603c9147b16eea877ca23af92063483ea6a68d17f289393e7eb0952d7",
+    "heldout_scores": {
+      "47": 1.0,
+      "48": 1.0,
+      "49": 1.0,
+      "52": 1.0,
+      "53": 1.0
+    }
+  },
+  "qwen/dmv-hard": {
+    "model": "Qwen3.8-27B",
+    "task_id": "dmv_hard2/j5_v20_p6",
+    "source_run": "local_dmv_ours_20261019",
+    "family": "dmv2_j5v20_m_q",
+    "selected": "g3_fresh",
+    "version_sha256": "8c5694636c1256359c2d3709fcc2c1a8cded65ec6b3f827fe31daafea326c4e9",
+    "heldout_scores": {
+      "43": 0.4166666666666667,
+      "44": 0.6666666666666666,
+      "45": 0.2916666666666667,
+      "47": 0.5,
+      "48": 0.5,
+      "49": 0.5833333333333334,
+      "52": 0.625,
+      "53": 0.25,
+      "54": 0.4166666666666667,
+      "55": 0.2916666666666667
+    }
+  },
+  "qwen/minecraft-gallery": {
+    "model": "Qwen3.8-27B",
+    "task_id": "mc_gallery/g8_q8_c12p3",
+    "source_run": "local_mc_ours_20261019",
+    "family": "mc12_gallery_m_q",
+    "selected": "g3_fresh",
+    "version_sha256": "92ae128676d16ea353a6098fe73f3c4dddceca82219378ba02292b9aa8ae925a",
+    "heldout_scores": {
+      "43": 1.0,
+      "44": 0.875,
+      "45": 1.0,
+      "47": 1.0,
+      "48": 0.75,
+      "49": 1.0,
+      "52": 1.0,
+      "53": 1.0,
+      "54": 1.0,
+      "55": 1.0
+    }
+  },
+  "qwen/pac-man": {
+    "model": "Qwen3.8-27B",
+    "task_id": "23_pacman/23_05",
+    "source_run": "local_arcade_ours_20261019",
+    "family": "gw_pacman_m_q",
+    "selected": "g2_fresh",
+    "version_sha256": "bb2832af8102670e42ff9768e26f4e795cb471e609a4a68c0c393b3d82a25358",
+    "heldout_scores": {
+      "43": 0.316,
+      "44": 0.428,
+      "45": 0.836,
+      "47": 0.576,
+      "48": 0.464
+    }
+  },
+  "qwen/poster-maze": {
+    "model": "Qwen3.8-27B",
+    "task_id": "poster_maze/n9_k16_q8_g6p3",
+    "source_run": "local_maze_ours_20261019",
+    "family": "maze_poster_m_q",
+    "selected": "g3_revision",
+    "version_sha256": "edd2d6467a38010f9119a4f318c23e056178e10472c5eedc8f13b5965e08e98f",
+    "heldout_scores": {
+      "43": 0.625,
+      "44": 0.25,
+      "45": 0.875,
+      "47": 0.875,
+      "48": 1.0,
+      "49": 0.5,
+      "52": 0.875,
+      "53": 0.625,
+      "54": 0.75,
+      "55": 0.625
+    }
+  },
+  "qwen/tetris": {
+    "model": "Qwen3.8-27B",
+    "task_id": "29_tetris/29_05",
+    "source_run": "local_arcade_ours_20261019",
+    "family": "gw_tetris_m_q",
+    "selected": "g3_fresh",
+    "version_sha256": "c3fef8a7d6667e26012baef2692d2a48e4a337a7f4b01482543f31a46f7fcd84",
+    "heldout_scores": {
+      "43": 1.0,
+      "44": 1.0,
+      "45": 1.0,
+      "47": 0.9566666666666667,
+      "48": 1.0
+    }
+  }
+}

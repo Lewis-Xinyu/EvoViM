@@ -1,16 +1,15 @@
-"""Small durable primitives shared by the v3 repair paths.
-
-They deliberately operate on caller-provided roots, which keeps the historical
-run read-only and makes fault-injection tests use disposable fixtures.
-"""
+"""Persist evaluation attempts and publish the selected parent for a lineage."""
 from __future__ import annotations
 
 import hashlib
 import json
+from tempfile import NamedTemporaryFile
 import os
 from pathlib import Path
 import shutil
 from typing import Any
+
+from .outcome import VALID_EXECUTION, finite_score
 
 
 def _json(path: Path, default=None):
@@ -19,9 +18,15 @@ def _json(path: Path, default=None):
 
 def atomic_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    stream = NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False)
+    temporary = Path(stream.name)
+    try:
+        with stream:
+            json.dump(value, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def tree_hash(root: Path) -> str:
@@ -45,33 +50,28 @@ class AttemptStore:
         if not chosen or unit.get("candidate_hash") != candidate_hash or unit.get("eval_fingerprint") != eval_fingerprint:
             return None
         summary = _json(self.root / "attempts" / chosen / "summary.json")
-        # A selected attempt is reusable only when its immutable summary says
-        # it is a valid score.  A previous method/provider failure must remain
-        # forensic evidence, not a cached evaluation result.
         if not isinstance(summary, dict):
             return None
         outcome = summary.get("outcome")
         if isinstance(outcome, dict):
             if not outcome.get("score_valid", False):
                 return None
-        elif summary.get("status") not in {"completed", "terminated", "truncated"} or type(summary.get("score")) not in (int, float):
-            # Older immutable summaries lack the nested v3 contract. Their
-            # only compatible reuse path is an unambiguous finite valid score;
-            # anything else stays non-reusable and visible to recovery.
+        elif summary.get("status") not in VALID_EXECUTION or not finite_score(summary.get("score")):
             return None
         return summary
 
     def begin(self, candidate_hash: str, eval_fingerprint: str) -> tuple[str, Path]:
         attempts = self.root / "attempts"
         attempts.mkdir(exist_ok=True)
-        numbers = [int(path.name[1:]) for path in attempts.glob("a[0-9][0-9][0-9]") if path.is_dir()]
-        attempt_id = f"a{max(numbers, default=0) + 1:03d}"
-        destination = attempts / attempt_id
-        destination.mkdir()
         current = _json(self.root / "unit.json", {})
         if current and (current.get("candidate_hash") != candidate_hash or
                         current.get("eval_fingerprint") != eval_fingerprint):
             raise RuntimeError("logical unit identity mismatch")
+        numbers = [int(path.name[1:]) for path in attempts.glob("a[0-9]*")
+                   if path.is_dir() and path.name[1:].isdigit()]
+        attempt_id = f"a{max(numbers, default=0) + 1:03d}"
+        destination = attempts / attempt_id
+        destination.mkdir()
         current.update({"schema_version": 1, "logical_unit_id": self.root.name,
                         "candidate_hash": candidate_hash, "eval_fingerprint": eval_fingerprint,
                         "selected_attempt": current.get("selected_attempt")})
@@ -145,13 +145,17 @@ class Promotion:
         if record["state"] == "committed":
             return record
         current = self.current()
-        if current is not None and current.get("version_hash") != record["parent_before"].get("version_hash"):
+        digest = record["candidate_hash"]
+        already_published = (current is not None and current.get("version_hash") == digest
+                             and current.get("comparison_id") == comparison_id)
+        if current and not already_published and current.get("version_hash") != record["parent_before"].get("version_hash"):
             raise RuntimeError("stale_parent_cas")
         staging = Path(record["staging"])
-        if not staging.exists() or tree_hash(staging / "bundle") != record["candidate_hash"]:
+        final = self.versions / digest
+        version = final if final.exists() else staging
+        if not (version / "bundle").is_dir() or tree_hash(version / "bundle") != digest:
             raise RuntimeError("candidate_hash_mismatch")
-        final = self.versions / record["candidate_hash"]
-        if not final.exists():
+        if version == staging:
             os.replace(staging, final)
         pointer = {"version_hash": record["candidate_hash"], "comparison_id": comparison_id,
                    "bundle": str((final / "bundle").relative_to(self.root)),
@@ -183,7 +187,8 @@ def efficiency(parent: dict, candidate: dict, expected_units: set[str], threshol
     for unit in sorted(expected_units):
         left, right = parent.get(unit), candidate.get(unit)
         if not isinstance(left, dict) or not isinstance(right, dict):
-            missing.append(unit); continue
+            missing.append(unit)
+            continue
         row = {}
         for field in ("steps", "requests", "input_tokens", "output_tokens"):
             a, b = left.get(field), right.get(field)

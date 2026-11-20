@@ -1,11 +1,11 @@
-"""Host-owned command protocol: the system prefix shown to the model and an independent decoder."""
+"""Host-owned command protocol: the system prefix shown to the model and command validation."""
 from __future__ import annotations
 
 import json
 import re
 from typing import Any
 
-from .child.registry import COMMAND_RE, LEGACY_KEYS, ProtocolError, sample_arguments, validate
+from .child.registry import LEGACY_KEYS, parse_arguments, parse_command, sample_arguments, validate
 
 OVERRIDE = "These formatting rules override any permission to issue multiple commands in the user prompt."
 
@@ -28,8 +28,6 @@ def _example(tool: dict[str, Any], files: list[str]) -> str:
 def _usage(tool: dict[str, Any]) -> str:
     if tool.get("legacy"):
         return "<|%s|>%s<|END|>" % (tool["name"], "|".join(LEGACY_KEYS[tool["name"]]))
-    # A concrete JSON object, never a placeholder: in pilot r2 the model copied
-    # the old "{JSON arguments}" text literally in 19% of Crafter RECALL_IMAGE calls.
     example = json.dumps(sample_arguments(tool.get("parameters", {})), ensure_ascii=False, separators=(",", ":"))
     return "<|%s|>%s<|END|> (a JSON object like this one, with your own values) parameters=%s" % (
         tool["name"], example, json.dumps(tool.get("parameters", {}), ensure_ascii=False, sort_keys=True))
@@ -37,16 +35,6 @@ def _usage(tool: dict[str, Any]) -> str:
 
 def _normalize_action_spec(value: list[str] | dict[str, Any]) -> dict[str, Any]:
     return {"kind": "finite", "actions": value, "dynamic": False} if isinstance(value, list) else value
-
-
-def _action_allowed(payload: str, action_spec: list[str] | dict[str, Any]) -> bool:
-    spec = _normalize_action_spec(action_spec)
-    if spec.get("kind") == "finite":
-        return payload in spec.get("actions", [])
-    if spec.get("kind") == "free_text":
-        return bool(payload) and len(payload) <= int(spec.get("max_length", 512)) and not any(
-            char in payload for char in ("\x00", "\n", "\r"))
-    return False
 
 
 def system_prefix(phase: str, tools: list[dict[str, Any]], actions: list[str] | dict[str, Any], files: list[str]) -> str:
@@ -108,35 +96,16 @@ def system_prefix(phase: str, tools: list[dict[str, Any]], actions: list[str] | 
 
 def host_decode(text: str, phase: str, tools: list[dict[str, Any]], actions: list[str] | dict[str, Any]):
     """Return (name, payload) for a well-formed single command in this phase, else None."""
-    if text.strip() == "<|DONE|>":
-        return ("DONE", "") if phase == "LOG" else None
-    matches = list(COMMAND_RE.finditer(text))
-    if len(matches) != 1:
-        return None
-    name, payload = matches[0].group(1), matches[0].group(2).strip()
-    if "<|" in payload:
-        return None
-    if name == "ACTION":
-        return (name, payload) if phase == "PLAN" and _action_allowed(payload, actions) else None
-    tool = next((t for t in tools if t.get("name") == name and phase in t.get("phases", [])), None)
-    if tool is None:
-        return None
     try:
-        if tool.get("legacy"):
-            keys = LEGACY_KEYS[name]
-            parts = payload.split("|", len(keys) - 1)
-            if len(parts) != len(keys):
+        name, payload = parse_command(text, phase, actions)
+        if name not in {"ACTION", "DONE"}:
+            tool = next((t for t in tools if t.get("name") == name and phase in t.get("phases", [])), None)
+            if tool is None:
                 return None
-            args = dict(zip(keys, parts))
-            if name == "TAIL":
-                args["n"] = int(args["n"])
-        else:
-            args = json.loads(payload)
-            if not isinstance(args, dict):
-                return None
-        validate(args, tool.get("parameters", {}))
+            args = parse_arguments(name, payload, tool.get("legacy", False))
+            validate(args, tool.get("parameters", {}))
         return name, payload
-    except (ValueError, TypeError, ProtocolError):
+    except (ValueError, TypeError, KeyError):
         return None
 
 

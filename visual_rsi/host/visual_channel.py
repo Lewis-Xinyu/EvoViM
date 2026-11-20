@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import copy
 from typing import Any
 
 from PIL import Image, ImageChops, ImageDraw, ImageOps
 
-from .dto import ContainmentError
+from .dto import ContainmentError, validate_frame_id
 
 PALETTE = {
     "wall": "#374151", "floor": "#f3f4f6", "visited": "#bfdbfe",
@@ -20,21 +19,9 @@ PALETTE = {
 @dataclass(frozen=True)
 class VisualLimits:
     max_program_ops: int = 32
-    # BALROG's native NLE tile observation is 1264x336.  The previous 768
-    # bound made an exact saved frame impossible to recall even though the
-    # current-frame V/M path already delivered it.  1536 admits that audited
-    # native frame while retaining a finite host-enforced bound.
     max_output_side: int = 1536
     max_tile_frames: int = 16
-    # There is no per-phase or per-episode cap on historical images: each
-    # delivery is counted (phase_deliveries / episode_deliveries) and reported,
-    # never refused.  The earlier 1-per-phase and 64-per-episode caps made 14%
-    # of Crafter recalls in pilot r2 fail with an error.
     max_mark_text: int = 40
-    # Canvas: no grid, primitive, label or path-length caps (a full 64x64 map
-    # alone needs 4096 cells).  Colours stay semantic-palette-only, which keeps
-    # a candidate from encoding pixels cell by cell; size is bounded only by
-    # max_output_side.
 
 
 class FrameStore:
@@ -47,6 +34,7 @@ class FrameStore:
         self.last_description = ""
 
     def add(self, frame_id: str, step: int, image: Image.Image) -> None:
+        validate_frame_id(frame_id)
         if frame_id in self.frames:
             raise ContainmentError("duplicate frame id")
         if not isinstance(image, Image.Image):

@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from PIL import Image
+
+
+class BudgetExhausted(RuntimeError):
+    """A model request would exceed the authorized evaluation budget."""
 
 
 @dataclass(frozen=True)

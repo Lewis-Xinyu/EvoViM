@@ -1,14 +1,7 @@
-"""Unprivileged candidate worker. Only JSON DTOs cross stdio; it never sees the world or a key.
+"""Run the candidate's agent inside a separate process.
 
-Ported from the r2 C01/C05 workers. The candidate's own ``agent.act``,
-``_log_phase`` and ``_plan_validate_phase`` run unchanged. The runtime only
-replaces the module-level command parsers, the per-instance tool dispatchers
-and the result formatter with the host registry, and wraps (never replaces)
-the two phase methods to know which phase is active. The host enforces every
-limit; nothing here is a security boundary.
-
-This file is copied next to ``registry.py`` into a per-worker runtime
-directory and must not import anything from the repository.
+This bootstrap and registry.py are copied together. The host brokers model
+calls and validates actions while the candidate owns its memory and prompts.
 """
 import base64
 import importlib
@@ -22,11 +15,8 @@ import sys
 import traceback
 import types
 
-# Resolve host dependencies while only the copied host runtime and the venv
-# are on sys.path.  In particular, image decoding must never pick up a PIL or
-# OmegaConf lookalike from the candidate bundle.
+# Resolve dependencies before adding the candidate to the import path.
 import numpy  # noqa: F401
-import PIL  # noqa: F401
 from PIL import Image, PngImagePlugin  # noqa: F401
 from omegaconf import OmegaConf
 
@@ -80,10 +70,7 @@ class HostStop(BaseException):
     """Raised when the host ends the decision; BaseException so upstream `except Exception` cannot swallow it."""
 
 
-# Upstream's inner scaffold keys hand-written per-game content (initial knowledge
-# files, spatial guidance, system prompts, NLE map analysis) on these names.  The
-# study's G0 is the generic scaffold: game knowledge is never supplied by the
-# researchers, so a colliding adapter name is passed to the agent neutralised.
+# Use generic starting prompts for adapter names with game-specific upstream knowledge.
 UPSTREAM_KNOWLEDGE_KEYS = frozenset({"crafter", "nle", "minihack"})
 
 
@@ -154,11 +141,12 @@ def main():
     bundle = Path(sys.argv[1]).resolve()
     scratch = Path(sys.argv[2]).resolve()
     runtime = Path(__file__).resolve().parent
-    # No CPU-time rlimit (removed 2026-09-26; it capped a whole episode at 600 s
-    # of candidate CPU).  The host's per-wait backstop ends a hung candidate.
     _exit_with_parent()
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (256 * 1024 ** 2, 256 * 1024 ** 2))  # 16 MB -> 256 MB, 2026-09-26
+    file_cap = 256 * 1024 ** 2
+    limits = tuple(file_cap if limit == resource.RLIM_INFINITY else min(limit, file_cap)
+                   for limit in resource.getrlimit(resource.RLIMIT_FSIZE))
+    resource.setrlimit(resource.RLIMIT_FSIZE, limits)
     sys.stdout = sys.stderr  # candidate print() cannot corrupt the JSON channel
     init = receive()
     try:
@@ -190,12 +178,7 @@ def main():
         actions = list(init["actions"])
         action_spec = init.get("action_spec") or {"kind": "finite", "actions": actions}
 
-        # The frozen upstream agent contains an NLE-only compatibility repair
-        # that turns commands such as ``open east`` into the first half of a
-        # multi-step NetHack command.  A free-text adapter (TextWorld) has a
-        # different contract: the model-committed command is already complete
-        # and must reach the environment unchanged.  Disable that legacy repair
-        # at this protocol boundary without changing the candidate bundle.
+        # Free-text adapters take complete commands such as "open east".
         if action_spec.get("kind") == "free_text" and callable(
                 getattr(original, "repair_combined_action", None)):
             original.repair_combined_action = lambda raw_action: (str(raw_action).strip(), False)
@@ -257,10 +240,6 @@ def main():
             "max_validate_iterations": int(init.get("max_validate_iterations", 10)),
             "max_search_results": 1000, "fallback_action": init["fallback_action"],
             "memory_dir": str(scratch / "memory")}})
-        # Matches upstream config.yaml (max_text_history: 10).  Upstream MemoryAgent
-        # never calls get_prompt(): every LOG/PLAN prompt is built from the current
-        # observation and memory files, so this window only matters to a candidate
-        # that chooses to read the builder's history.
         builder = HistoryPromptBuilder(system_prompt=init["instruction"], max_image_history=0,
                                        max_text_history=10)
         agent = candidate.Agent(lambda: Client(), builder, config)
@@ -271,15 +250,7 @@ def main():
         registry = Registry(event, file_index=memory_files)
         holder.update(agent=agent, registry=registry)
         if init.get("no_automem"):
-            # N0 is a host-defined ablation of LLM-written memory, not a
-            # candidate rewrite.  The LOG phase -- the only phase in which the
-            # LLM writes -- is suppressed, every write is refused, and the
-            # visual recall channel is removed.  The PLAN prompt and its read
-            # tools stay identical to G0's and read the same initial files, so
-            # N0 differs from G0 only in what the LLM records during play.
-            # (Until 2026-09-25 N0 replaced memory with a stub whose reads were
-            # unregistered commands, so the unchanged PLAN prompt produced
-            # protocol errors on every attempted SEARCH/READ.)
+            # Preserve the initial memory and PLAN reads in the no-memory-write baseline.
             def refuse(*args, **kwargs):
                 return "[N0: memory is read-only in this condition]"
             for name in ("append", "write", "create"):
@@ -402,10 +373,7 @@ def main():
         try:
             agent.step_count = int(request["step"])
             agent.visual_observation_available = bool(request.get("visual_observation_available"))
-            # The frozen upstream agent infers "stuck" from text equality.
-            # Visual tasks can have constant text and changing pixels; even
-            # identical pixels do not prove the previous action had no hidden
-            # effect. Disable that text-only inference for visual observations.
+            # Identical text can accompany different pixels on visual tasks.
             if agent.visual_observation_available:
                 if hasattr(agent, "_prev_obs_text"):
                     agent._prev_obs_text = None

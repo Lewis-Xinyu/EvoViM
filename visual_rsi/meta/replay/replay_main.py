@@ -16,26 +16,17 @@ import ast
 import json
 from pathlib import Path
 import re
-import sys
 import tempfile
 import traceback
 
-# Keep replay's host dependencies resolved before any candidate bundle exists.
-# Its child Worker uses the same preload order as formal episodes.
-import numpy  # noqa: F401
-import PIL  # noqa: F401
-from PIL import Image, PngImagePlugin  # noqa: F401
-from omegaconf import OmegaConf  # noqa: F401
+from PIL import Image
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-
-from v8host.bundle import install_bundle, overlay_files  # noqa: E402
-from v8host.child.registry import sample_arguments  # noqa: E402
-from v8host.model import ModelReply  # noqa: E402
-from v8host.protocol_text import memory_filenames, system_prefix  # noqa: E402
-from v8host.visual_channel import FrameStore  # noqa: E402
-from v8host.worker_process import Worker  # noqa: E402
+from replay_host.bundle import install_bundle, overlay_files
+from replay_host.child.registry import sample_arguments
+from replay_host.model import ModelReply
+from replay_host.protocol_text import memory_filenames, system_prefix
+from replay_host.visual_channel import FrameStore
+from replay_host.worker_process import Worker
 
 
 def definitions(source: str) -> dict[str, str]:
@@ -78,10 +69,7 @@ class StubModel:
     def __init__(self, tools: list[dict], action: str):
         self.log_queue = [t for t in tools if not t.get("legacy") and "LOG" in t.get("phases", [])]
         self.plan_queue = [t for t in tools if not t.get("legacy") and "LOG" not in t.get("phases", [])]
-        # Exercise the stateful visual contract before destructive/derived
-        # operations: save during LOG, then recall during PLAN.  Calling every
-        # tool in registry order could delete img_0001 before recall and turn a
-        # replay-order artifact into a false visual-channel failure.
+        # Save before recall or deletion so the model can exercise the visual channel.
         visual_order = {"SAVE_FRAME": 0, "RECALL_IMAGE": 1, "ANNOTATE_IMAGE": 2, "DELETE_IMAGE": 3}
         self.log_queue.sort(key=lambda tool: (visual_order.get(tool.get("name"), 10), tool.get("name", "")))
         self.plan_queue.sort(key=lambda tool: (tool.get("name") != "RECALL_IMAGE",
@@ -122,13 +110,13 @@ def load_episode(evidence: Path) -> tuple[Path, dict, list[dict]]:
     return episode, meta, rows
 
 
-def replay(candidate: Path, parent: Path, evidence: Path, line: str, steps: int | None) -> dict:
+def replay(candidate: Path, parent: Path, evidence: Path, line: str, steps: int | None, mode: str = "process") -> dict:
     report = {"crashed": False, "status": "ok", "traceback": "", "tools_called_via_model": [], "tool_errors": {},
               "changed_functions_executed": {}, "visual_requests": {"valid": 0, "invalid": 0},
               "state_round_trip": False, "steps": 0, "final_memory": {}, "evidence_episode": None}
     overlay = overlay_files(candidate)
     changed = changed_definitions(parent, overlay)
-    with tempfile.TemporaryDirectory(prefix="v8-replay-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="evovim-replay-") as tmp:
         tmp = Path(tmp)
         worker = second = None
         try:
@@ -147,7 +135,7 @@ def replay(candidate: Path, parent: Path, evidence: Path, line: str, steps: int 
                     frames.add(frame_id, index, images[frame_id])
             options = dict(line=line, instruction=meta["instruction"], actions=actions,
                            action_spec=action_spec, adapter_name=meta["adapter_name"],
-                           fallback_action=meta["fallback_action"], mode="process",
+                           fallback_action=meta["fallback_action"], mode=mode,
                            phase_caps=meta.get("phase_caps"))  # the caps the evidence was recorded under
             worker = Worker(bundle, tmp / "worker", profile_calls=True, **options)
             report["phase_caps"] = dict(worker.caps)
@@ -201,9 +189,10 @@ def main(argv=None) -> int:
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--line", choices=["T", "V", "M"], required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--mode", choices=("process", "seatbelt"), default="process")
     parser.add_argument("--steps", type=int)
     args = parser.parse_args(argv)
-    report = replay(args.candidate.resolve(), args.parent.resolve(), args.evidence.resolve(), args.line, args.steps)
+    report = replay(args.candidate.resolve(), args.parent.resolve(), args.evidence.resolve(), args.line, args.steps, args.mode)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"crashed": report["crashed"], "steps": report["steps"], "status": report["status"]}))

@@ -1,6 +1,7 @@
 """Offline campaign using the real grid, candidate worker, selection and storage."""
 
 import json
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from unittest.mock import patch
 from visual_rsi.evolution import codex_runner
 from visual_rsi.evolution.quick_evo import Run
 from visual_rsi.host import transport
+from visual_rsi.host.repair import Promotion
 
 
 def manifest(workspaces):
@@ -57,6 +59,11 @@ def revise(argv, *, cwd, **kwargs):
     changed = output / "revised_code" / relative
     changed.parent.mkdir(parents=True, exist_ok=True)
     changed.write_text(source.replace(line, line + addition), encoding="utf-8")
+    command = (output.parent / "replay_command.txt").read_text()
+    subprocess.run(shlex.split(command), cwd=output, check=True, capture_output=True, timeout=60)
+    report = json.loads((output / "replay_report.json").read_text())
+    if report["crashed"] or report["steps"] != 1:
+        raise AssertionError(report)
     transcript = json.dumps({"type": "turn.completed", "usage": {"input_tokens": 100,
                                                                   "output_tokens": 30}})
     return subprocess.CompletedProcess(argv, returncode=0, stdout=transcript, stderr="")
@@ -67,12 +74,22 @@ class CampaignTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             config = base / "manifest.json"
-            config.write_text(json.dumps(manifest(base / "workspaces")))
+            config.write_text(json.dumps(manifest(base / "revision workspaces")))
             root = base / "run"
             meta = partial(codex_runner.run_meta_slot, runner=revise)
             with patch.object(codex_runner, "run_preflight", return_value={"passed": True}), \
                  patch.object(codex_runner, "run_meta_slot", side_effect=meta) as revision, \
                  patch.object(transport, "make_sender", return_value=reply) as sender:
+                # The first supervisor stops just after publishing the accepted parent.
+                commit = Promotion.commit
+
+                def interrupt_after_commit(promotion, comparison):
+                    commit(promotion, comparison)
+                    raise InterruptedError("test interruption")
+
+                with patch.object(Promotion, "commit", interrupt_after_commit):
+                    with self.assertRaises(InterruptedError):
+                        Run(root, config).run()
                 result = Run(root, config).run()
                 self.assertEqual(result["status"], "COMPLETED", result)
                 revision.assert_called_once()

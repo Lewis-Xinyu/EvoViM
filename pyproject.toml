@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "evovim"
-version = "0.2.0"
+version = "0.3.0"
 description = "Run and evolve visual memory programs for multimodal agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-evovim = "visual_rsi.evolution.quick_evo:main"
+evovim = "visual_rsi.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["visual_rsi", "visual_rsi.*"]
@@ -24,3 +24,5 @@ namespaces = false
 
 [tool.setuptools.package-data]
 visual_rsi = ["docs/*.md", "meta/prompt_template.md"]
+"visual_rsi.programs" = ["catalog.json", "snapshots/*/*/*.py", "snapshots/*/*/*/*.py", "snapshots/*/*/source_manifest.json"]
+"visual_rsi.benchmarks" = ["tasks.json", "*/*.py", "*/*.js"]

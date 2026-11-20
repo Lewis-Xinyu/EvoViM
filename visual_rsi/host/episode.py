@@ -1,20 +1,31 @@
 """One host episode: reset -> observe -> candidate decision in a separate process -> step."""
 from __future__ import annotations
 
-import json
 import hashlib
+import io
+import json
 from pathlib import Path
 import traceback
 from typing import Any
 
 from .dto import CandidateHung, validate_public_obs
+from .model import BudgetExhausted
 from .protocol_text import memory_filenames, system_prefix
+from .task_metrics import map_metrics
 from .visual_channel import FrameStore
 from .worker_process import BACKSTOP_SECONDS, MODES, CandidateStartFailure, Worker
 
 
-class BudgetExhausted(RuntimeError):
-    """Raised by a paid model before a request that would exceed an authorized cap."""
+def _archive_observation(observation, archive: Path, name: str, *, save_image: bool = False) -> None:
+    record = {"text": dict(observation.text), "frame_id": observation.frame_id, "image_sha256": None}
+    if observation.image is not None:
+        buffer = io.BytesIO()
+        observation.image.convert("RGB").save(buffer, format="PNG")
+        data = buffer.getvalue()
+        record["image_sha256"] = hashlib.sha256(data).hexdigest()
+        if save_image:
+            (archive / f"{name}.png").write_bytes(data)
+    (archive / f"{name}.json").write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _write_memory(snapshot: dict, destination: Path) -> None:
@@ -63,9 +74,6 @@ def run_episode(adapter, bundle, *, line: str, seed: int, model, archive, max_st
         directory.mkdir(exist_ok=True)
     trajectory = archive / "trajectory.jsonl"
     calls_path = archive / "calls.jsonl"
-    # An attempt archive is immutable.  Re-entering an existing physical
-    # attempt must be diagnosed by recovery, never erase the useful half of a
-    # trace and then look like a clean re-run.
     if trajectory.exists() or calls_path.exists():
         raise FileExistsError("attempt archive already contains trajectory or calls evidence")
     limit = int(max_steps if max_steps is not None else getattr(adapter, "max_steps", 1))
@@ -82,10 +90,6 @@ def run_episode(adapter, bundle, *, line: str, seed: int, model, archive, max_st
                                "no_automem": bool(no_automem)}
     worker = None
     observation = None
-    actions: list[str] = []
-    action_spec: dict[str, Any] = {"kind": "finite", "actions": []}
-    fallback = "Noop"
-    instruction = ""
     last_memory: dict = {}
     try:
         adapter.reset(seed)
@@ -97,14 +101,7 @@ def run_episode(adapter, bundle, *, line: str, seed: int, model, archive, max_st
         instruction = str(adapter.task_instruction())
         metric = adapter.metric_description()
         observation = adapter.observe()
-        initial = {"text": dict(observation.text), "frame_id": observation.frame_id,
-                   "image_sha256": None}
-        if observation.image is not None:
-            data = __import__("io").BytesIO()
-            observation.image.convert("RGB").save(data, format="PNG")
-            initial["image_sha256"] = hashlib.sha256(data.getvalue()).hexdigest()
-        (archive / "initial_observation.json").write_text(
-            json.dumps(initial, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _archive_observation(observation, archive, "initial_observation")
         (archive / "episode.json").write_text(json.dumps({
             "protocol_version": 2, "line": line, "adapter_name": adapter.name,
             "task_id": getattr(adapter, "task_id", None), "observation_profile": getattr(adapter, "observation_profile", None),
@@ -183,25 +180,23 @@ def run_episode(adapter, bundle, *, line: str, seed: int, model, archive, max_st
             if raw_score is None:
                 summary["score_status"] = "pending_offline_judge"
             summary["reward_sum"] += float(outcome.reward)
-            if isinstance(outcome.metrics, dict) and outcome.metrics.get("success") is not None:
-                summary["native_success"] = bool(outcome.metrics["success"])
+            native_success = None
             if isinstance(outcome.metrics, dict):
-                from .task_metrics import map_metrics
-                summary["aux_metrics"] = map_metrics(adapter.name, outcome.metrics,
-                                                      outcome.private_record)
+                if outcome.metrics.get("success") is not None:
+                    native_success = bool(outcome.metrics["success"])
+                    summary["native_success"] = native_success
+                summary["aux_metrics"] = map_metrics(adapter.name, outcome.metrics, outcome.private_record)
             summary["actions"].append(action)
             summary["steps"] += 1
-            record = {"step": step, "observation": {"text": public["text"], **({"frame_id": frame_id} if line != "T" else {})},
+            record = {"step": step, "observation": public,
                       "action": action, "executed_action": executed_action, "fallback": used_fallback,
                       "host_fallback": bool(result["fallback"]), "environment_fallback": environment_fallback,
                       "action_override": bool(result.get("action_override")),
                       "action_mapping": outcome.action_mapping, "reward": float(outcome.reward),
                       "score": summary["score"], "terminated": bool(outcome.terminated),
                       "truncated": bool(outcome.truncated),
-                      "native_success": (bool(outcome.metrics["success"])
-                                         if isinstance(outcome.metrics, dict)
-                                         and outcome.metrics.get("success") is not None else None),
-                      "requests": {phase: count for phase, count in result.get("counts", {}).items()},
+                      "native_success": native_success,
+                      "requests": result.get("counts", {}),
                       "candidate_compute_seconds": compute}
             with trajectory.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
@@ -232,14 +227,7 @@ def run_episode(adapter, bundle, *, line: str, seed: int, model, archive, max_st
             _archive_memory_files(worker.scratch / "memory", archive, archive / "memory_manifests" / "final.json")
         try:
             if observation is not None:
-                final = {"text": dict(observation.text), "frame_id": observation.frame_id, "image_sha256": None}
-                if observation.image is not None:
-                    data = __import__("io").BytesIO()
-                    observation.image.convert("RGB").save(data, format="PNG")
-                    final["image_sha256"] = hashlib.sha256(data.getvalue()).hexdigest()
-                    observation.image.convert("RGB").save(archive / "final_observation.png", format="PNG")
-                (archive / "final_observation.json").write_text(
-                    json.dumps(final, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                _archive_observation(observation, archive, "final_observation", save_image=True)
         finally:
             close = getattr(adapter, "close", None)
             if callable(close):

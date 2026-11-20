@@ -1,11 +1,7 @@
-"""Host side of the candidate process boundary (ported from r2 sandbox.Worker).
+"""Run candidate decisions in a child process and validate model requests and actions.
 
-The candidate always runs in a separate process: under Seatbelt for formal runs
-(`seatbelt`), or with the same program and a clean environment but no Seatbelt
-for offline checks inside another sandbox (`process`). Every rule that matters
-is enforced here, never inside the candidate process: per-step phase caps, LOG
-before PLAN, the model-committed action, modality boundaries, compute timeouts
-and resource watchdogs.
+In process mode the caller trusts the candidate. Seatbelt mode also restricts
+its filesystem and network access on macOS.
 """
 from __future__ import annotations
 
@@ -28,13 +24,10 @@ from PIL import Image
 
 from .bundle import profile, verify_bundle
 from .dto import CandidateHung, ContainmentError, Violation
-from .model import ModelCall
+from .model import BudgetExhausted, ModelCall
 from .protocol_text import host_decode
 
 MODES = ("seatbelt", "process")
-# Resource guards on the candidate worker, widened 2026-09-26 (user-approved) so that
-# heavier candidates (e.g. torch/opencv) are not killed: RSS 768 MB -> 4 GB, scratch
-# 64 MB -> 1 GB, files 2048 -> 32768, IPC message 4 MB -> 64 MB.
 MAX_MESSAGE = 64 * 1024 ** 2
 WATCHDOG = {"disk_bytes": 1024 ** 3, "files": 32768, "rss_kb": 4 * 1024 ** 2}
 CHILD_FILES = ("worker_main.py", "registry.py")
@@ -74,7 +67,6 @@ def child_env(scratch: Path) -> dict[str, str]:
             "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"}
 
 
-# Backstop per wait on the candidate (not a budget): 60x the old 30 s limit.
 BACKSTOP_SECONDS = 30 * 60.0
 
 
@@ -111,9 +103,6 @@ class Worker:
         self.line, self.mode, self.actions = line, mode, list(actions)
         self.action_spec = action_spec or {"kind": "finite", "actions": self.actions, "dynamic": False}
         self.fallback_action = fallback_action
-        # 2026-09-26: the 30 s / 90 s limits are gone; compute time is recorded in
-        # `compute_seconds`.  Only a 30-minute backstop per wait remains, so an
-        # infinite loop ends one episode (candidate_hung) instead of hanging the run.
         self.compute_timeout = None if compute_timeout is None else float(compute_timeout)
         self.compute_seconds = 0.0
         self.caps = dict(phase_caps or {"LOG": 10, "PLAN": 10})
@@ -128,47 +117,43 @@ class Worker:
             policy.write_text(profile(self.bundle, self.scratch, self.runtime), encoding="utf-8")
             argv = ["/usr/bin/sandbox-exec", "-f", str(policy), *argv]
         self.stderr = (self.root / "stderr.log").open("wb")
-        # Resource limits are applied by the trusted child bootstrap before it
-        # imports candidate code.  preexec_fn is unsafe with threaded hosts.
-        self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
-                                     cwd=self.scratch, env=child_env(self.scratch), start_new_session=True)
-        self.selector = selectors.DefaultSelector()
-        self.selector.register(self.proc.stdout, selectors.EVENT_READ)
-        self.monitor = threading.Thread(target=self._watch, daemon=True)
-        self.monitor.start()
-        self._send({"line": line, "instruction": instruction, "actions": self.actions,
-                    "action_spec": self.action_spec,
-                    "adapter_name": adapter_name, "fallback_action": fallback_action,
-                    "max_log_iterations": self.caps["LOG"], "max_validate_iterations": self.caps["PLAN"],
-                    "checkpoint": checkpoint, "profile": bool(profile_calls),
-                    "no_automem": bool(no_automem),
-                    "disable_visual_recall": bool(disable_visual_recall)})
         try:
+            self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
+                                         cwd=self.scratch, env=child_env(self.scratch), start_new_session=True)
+            self.selector = selectors.DefaultSelector()
+            self.selector.register(self.proc.stdout, selectors.EVENT_READ)
+            self.monitor = threading.Thread(target=self._watch, daemon=True)
+            self.monitor.start()
+            self._send({"line": line, "instruction": instruction, "actions": self.actions,
+                        "action_spec": self.action_spec,
+                        "adapter_name": adapter_name, "fallback_action": fallback_action,
+                        "max_log_iterations": self.caps["LOG"], "max_validate_iterations": self.caps["PLAN"],
+                        "checkpoint": checkpoint, "profile": bool(profile_calls),
+                        "no_automem": bool(no_automem),
+                        "disable_visual_recall": bool(disable_visual_recall)})
             ready = self._read(startup_timeout)
+            if ready.get("kind") == "crash":
+                trace = str(ready.get("traceback", ""))
+                failure = f"candidate failed to start: {ready.get('error')}\n{trace}"
+                if str(self.bundle) in trace:
+                    raise CandidateStartFailure(failure)
+                raise ContainmentError(failure)
+            if ready.get("kind") != "ready":
+                raise ContainmentError("worker initialization failed")
         except BaseException:
             self.close()
             raise
-        if ready.get("kind") == "crash":
-            self.close()
-            failure = ("candidate failed to start: " + str(ready.get("error")) + "\n" +
-                       str(ready.get("traceback", "")))
-            if str(self.bundle) in str(ready.get("traceback", "")):
-                raise CandidateStartFailure(failure)
-            raise ContainmentError(failure)
-        if ready.get("kind") != "ready":
-            self.close()
-            raise ContainmentError("worker initialization failed")
         self.tools = ready.get("tools", [])
 
-    # ------------------------------------------------------------------ transport
     def _watch(self):
         tick, files, disk = 0, [], 0
         while not self.closed and self.proc.poll() is None:
             try:
-                if tick % 5 == 0:  # the scratch scan is costlier now that it may hold 32k files: once a second
+                if tick % 5 == 0:  # Scan scratch once per second.
                     files = [p for p in self.scratch.rglob("*") if p.is_file()]
                     disk = sum(p.stat().st_size for p in files)
-                rss = subprocess.check_output(["/bin/ps", "-o", "rss=", "-p", str(self.proc.pid)], text=True).strip()
+                rss = subprocess.check_output(["/bin/ps", "-o", "rss=", "-p", str(self.proc.pid)],
+                                              text=True, stderr=subprocess.DEVNULL).strip()
                 rss_kb = int(rss) if rss else 0
                 if disk > self.limits["disk_bytes"] or len(files) > self.limits["files"] or rss_kb > self.limits["rss_kb"]:
                     self.resource_error = (f"resource watchdog: scratch {disk} B / {self.limits['disk_bytes']}, "
@@ -220,7 +205,6 @@ class Worker:
         line, self.buffer = self.buffer.split(b"\n", 1)
         return json.loads(line)
 
-    # ------------------------------------------------------------------ decisions
     def act(self, *, step: int, observation: dict, previous_action: str | None,
             previous_validated_action: str | None, frame_id: str | None, image, current_image,
             model, system_prefix: Callable[[str, list, list], str], frame_store=None) -> dict[str, Any]:
@@ -275,8 +259,6 @@ class Worker:
                     images, labels = [], []
                     if self.line in {"V", "M"} and current_image is not None:
                         images.append(current_image)
-                        # Host frame IDs are not shown: RECALL_IMAGE takes the memory's own
-                        # IDs, and the probe showed the model recalling f000NN when it saw them.
                         labels.append(f"Current observation image (step {step}).")
                     if self.line == "M":
                         for rendered_image, label in pending:
@@ -350,11 +332,7 @@ class Worker:
                 elif kind == "decision":
                     action = message.get("action")
                     record.update(memory=message.get("memory", {}), source_calls=message.get("source_calls", {}))
-                    # An uncommitted candidate proposal is never authority.
-                    # A controlled no-command result uses the host-validated
-                    # fallback.  A candidate that rewrites the model-committed
-                    # action is annotated, not halted: the host executes the
-                    # committed action and records the attempted override.
+                    # Only a host-validated model action can reach the adapter.
                     override = committed is not None and action != committed
                     executed = committed if committed is not None else self.fallback_action
                     record.update(status="ok", action=executed, proposed_action=action,
@@ -380,18 +358,11 @@ class Worker:
             self.close()
             record.update(status="candidate_crashed", error=str(exc), counts=counts)
             return record
+        except BudgetExhausted as exc:
+            self.close()
+            record.update(status="budget_exhausted", error=str(exc), counts=counts)
+            return record
         except Exception as exc:
-            # BudgetExhausted is host authorization flow, not a provider
-            # fault. Avoid a circular import and return the partial record so
-            # run_episode can persist completed exchanges before stopping.
-            if exc.__class__.__name__ == "BudgetExhausted":
-                self.close()
-                record.update(status="budget_exhausted", error=str(exc), counts=counts)
-                return record
-            # Preserve every successfully completed exchange before the
-            # failed request.  The episode owns durable JSONL persistence and
-            # will classify this provider/host boundary separately from a
-            # candidate method failure.
             self.close()
             record.update(status="model_error", error=str(exc), counts=counts)
             return record

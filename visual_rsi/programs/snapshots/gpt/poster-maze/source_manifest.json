@@ -1,0 +1,14 @@
+{
+  "__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+  "agents/__init__.py": "8e3e2bc14a2f7280c07528edab79029b9198dee34fb0a73de0df74e26819b091",
+  "agents/base.py": "e7f6074ec1dad4b70c8cd03c9d9cdfedd0d32533de49e365e60e8bfed284ab10",
+  "agents/memory_agent.py": "66870f644ab0f8325b5f0da4c15fb9dc76fa20a6b0c46f9e0e0ad28b0913c47d",
+  "agents/visual_memory.py": "89825654b6689dd544eeb43c166facc022b9d5edfbbd33afe01ad60252b3eec5",
+  "candidate.py": "a3619e4a5dbb37abe2889a08fd7227dcd4a01065b5ee06c0e1ba8f145ed4c3d0",
+  "pattern_registration.py": "90f57acea71e466eea7a059f16c7465155d192b0bbe6608dbc015e38e9c0d772",
+  "prompt_builder/__init__.py": "363924ed355b87f87f97bcb93672cddf01d57651097dd4ee4f4c029c23f4c536",
+  "prompt_builder/history.py": "422dfdadc8a11f454699ec78410b1d5ef4d4f43912d205b98af61ac9bad8b72f",
+  "query_review.py": "952537f8bec0bfe9b05d2187793b90440b67ce71aa6520cfc9592c865352a8fa",
+  "scene_memory.py": "e9a3ae99ecb3002d0c8106b13acbf8d7927f9d0ff95545e7952fa5b4e3c4174c",
+  "visual_tools.py": "0164ff9c1297992818609c768eef89d6e79ad9dcf3d218ec51b85b6416b51c5a"
+}

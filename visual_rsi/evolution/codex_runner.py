@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 import subprocess
 import time
+from tempfile import mkdtemp
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -151,8 +152,10 @@ def run_meta_slot(config: Mapping[str, Any], run_dir: Path, workspace: Path, out
 
 
 def run_preflight(config: Mapping[str, Any], run_dir: Path, runner=subprocess.run) -> dict[str, Any]:
-    """Real preflight is paid through the Codex subscription; never called in stage 0."""
-    workspace = Path(run_dir) / "codex_preflight" / "workspace"
+    """Check the revision process in a fresh workspace before launching a campaign."""
+    root = Path(run_dir).resolve() / "codex_preflight"
+    root.mkdir(parents=True, exist_ok=True)
+    workspace = Path(mkdtemp(prefix="attempt-", dir=root))
     inputs, output = workspace / "input", workspace / "output"
     inputs.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
@@ -187,7 +190,7 @@ printf '{\"input_read\":%s,\"input_write_denied\":%s,\"network_denied\":%s}\\n' 
     argv = command(config, workspace)
     before = _tree_hash(inputs)
     result = runner(argv, input=prompt, capture_output=True, text=True, cwd=str(output),
-                    env=_safe_env(config), timeout=300)
+                    env=_safe_env(config), timeout=float(config.get("meta", {}).get("preflight_timeout_minutes", 5)) * 60)
     transcript = result.stdout
     (workspace / "preflight.stream.jsonl").write_text(transcript)
     script_checks = json.loads((output / "checks.json").read_text()) if (output / "checks.json").exists() else {}
@@ -201,8 +204,9 @@ printf '{\"input_read\":%s,\"input_write_denied\":%s,\"network_denied\":%s}\\n' 
               "json_trace": any('"type":"turn.completed"' in line or '"type": "turn.completed"' in line
                                 for line in transcript.splitlines())}
     passed = result.returncode == 0 and all(checks.values())
-    record = {"passed": passed, "checks": checks, "usage": parse_usage(transcript),
-              "cost_usd": usage_cost_usd(parse_usage(transcript), config["meta"]["codex"].get("price_per_million", {})),
+    usage = parse_usage(transcript)
+    record = {"passed": passed, "checks": checks, "usage": usage, "workspace": str(workspace),
+              "cost_usd": usage_cost_usd(usage, config["meta"]["codex"].get("price_per_million", {})),
               "billing_basis": "Configured API prices" if _route(config) == "api" else "Codex subscription"}
     (Path(run_dir) / "codex_preflight_passed.json").write_text(json.dumps(record, indent=2) + "\n")
     return record

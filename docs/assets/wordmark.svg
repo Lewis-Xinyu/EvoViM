@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="206" height="50" viewBox="0 0 206 50" role="img" aria-labelledby="title">
+  <title id="title">EvoViM</title>
+  <style>
+    .blue { fill: #184878; }
+    @media (prefers-color-scheme: dark) { .blue { fill: #90bdeb; } }
+  </style>
+  <text x="2" y="43" font-family="Georgia, 'Times New Roman', serif" font-size="53" font-weight="bold" letter-spacing="-2" textLength="201" lengthAdjust="spacingAndGlyphs"><tspan fill="#ef476f">E</tspan><tspan fill="#f28e2b">v</tspan><tspan fill="#00a890">o</tspan><tspan fill="#934bed">V</tspan><tspan class="blue">iM</tspan></text>
+</svg>

@@ -31,13 +31,13 @@ import time
 
 from omegaconf import OmegaConf
 
-from ..adapters import get_adapter
+from ..adapters import get_adapter, registered_adapters
 from ..host.bundle import install_bundle, overlay_files
 from ..host.child.registry import LEGACY_KEYS
 from ..host.episode import run_episode
 from ..host.worker_process import BACKSTOP_SECONDS
 from ..host.outcome import aggregate_outcomes, classify_summary
-from ..host.repair import AttemptStore, Promotion, atomic_json as atomic_repair_json, efficiency, finalize_feedback, tree_hash
+from ..host.repair import AttemptStore, Promotion, atomic_json, efficiency, finalize_feedback, tree_hash
 from ..host.paid import Ledger, PaidModel, load_authorization
 from ..host.provenance import startup_runtime, bind_runtime
 from ..host.visual_channel import VisualLimits
@@ -57,7 +57,6 @@ META_DOCUMENTS = ("analysis.md", "method_description.md", "tool_contracts.json",
                   "interface_requests.md")
 
 
-# ---------------------------------------------------------------------------- config
 def load_config(path: Path) -> dict:
     data = OmegaConf.to_container(OmegaConf.load(str(path)), resolve=True)
     return load_config_value(data)
@@ -68,6 +67,9 @@ def load_config_value(data: dict) -> dict:
     missing = [key for key in REQUIRED if key not in data]
     if missing:
         raise ValueError("missing required config fields: " + ",".join(missing))
+    adapter = data["benchmark"]["adapter"]
+    if adapter not in registered_adapters():
+        raise ValueError(f"Unknown adapter {adapter!r}. Registered adapters: {', '.join(registered_adapters())}")
     if not data["gate"].get("rule"):
         raise ValueError("gate.rule is required")
     if data["gate"]["rule"] not in {"strict_mean", "score_then_efficiency", "delta_threshold", "paired_permutation"}:
@@ -131,9 +133,6 @@ def load_config_value(data: dict) -> dict:
         if len(seeds) < minimum:
             raise ValueError(f"paired_permutation needs at least {minimum} dev seeds at alpha={data['gate'].get('alpha', 0.05)}")
     if exploratory:
-        # One measurement per dev seed and strict_mean selection.  Any number of
-        # dev seeds is allowed (the 2026-09-25 campaign uses one), and holdout
-        # seeds may be declared: only holdout-eval --unseal-holdout reads them.
         if repetitions != 1:
             raise ValueError("exploratory mode requires exactly one measurement per seed")
         if data["gate"]["rule"] not in {"strict_mean", "score_then_efficiency"}:
@@ -163,7 +162,6 @@ def _mde(config: dict, scores: dict | None) -> dict:
     return {"mde_80pct": None, "status": "measured after parent-eval"}
 
 
-# ---------------------------------------------------------------------------- paths
 def _line(run_dir: Path, line: str) -> Path:
     if line != "M":
         raise ValueError("The visual memory method uses line M")
@@ -214,7 +212,7 @@ def _record_measurement(line_dir: Path, bundle: Path, measurement_id: str, resul
     record = _read(path) if path.exists() else {"version_hash": tree_hash(bundle), "measurements": []}
     if not any(item["id"] == measurement_id for item in record["measurements"]):
         record["measurements"].append({"id": measurement_id, "result": result})
-        atomic_repair_json(path, record)
+        atomic_json(path, record)
 
 
 def _measured_parent(line_dir: Path, bundle: Path, initial: dict) -> tuple[dict, int]:
@@ -256,7 +254,6 @@ def _measured_parent(line_dir: Path, bundle: Path, initial: dict) -> tuple[dict,
             "efficiency_by_unit": efficiency_by_unit}, len(results)
 
 
-# ---------------------------------------------------------------------------- best measured version
 def _reference_is_best(config: dict) -> bool:
     gate = config.get("gate", {})
     return gate.get("reference", "parent") == "best" and bool(gate.get("parent_remeasure", False))
@@ -270,7 +267,7 @@ def _store_version(line_dir: Path, bundle: Path, evidence: Path, scores: dict) -
     if evidence.is_dir() and not (version / "evidence").is_dir():
         shutil.copytree(evidence, version / "evidence")
     if not (version / "scores.json").exists():
-        _write(version / "scores.json", scores)
+        atomic_json(version / "scores.json", scores)
 
 
 def _measured_versions(line_dir: Path) -> list[dict]:
@@ -331,7 +328,7 @@ def finalize_best_parent(run_dir: Path, line: str, *, episode_semaphore=None) ->
         result, code = _evaluate(run_dir, config, line, parent, "parent-remeasure", out,
                                  unit_suffix=":rfinal", episode_semaphore=episode_semaphore)
         result["version_hash"] = tree_hash(parent)
-        _write(out / "scores.json", result)
+        atomic_json(out / "scores.json", result)
         if code:
             return {"changed": False, "status": result.get("status"), "reason": "final remeasure incomplete"}
         _record_measurement(line_dir, parent, "final", result)
@@ -360,15 +357,15 @@ def select_best_parent(run_dir: Path, line: str, *, when: str) -> dict:
                "scores": str((version / "scores.json").relative_to(line_dir)),
                "evidence": str((version / "evidence").relative_to(line_dir)) if (version / "evidence").is_dir() else None}
     Promotion(line_dir)  # ensures versions/ and promotion_journal/ exist
-    atomic_repair_json(line_dir / "promotion_journal" / f"rollback_{when}.json",
+    atomic_json(line_dir / "promotion_journal" / f"rollback_{when}.json",
                        {"schema_version": 1, "kind": "rollback", "from": current_hash, "to": best["hash"],
                         "from_mean": current and current["mean"], "from_n": current and current["n"],
                         "to_mean": best["mean"], "to_n": best["n"], "state": "committed"})
-    atomic_repair_json(line_dir / "parent.current.json", pointer)
+    atomic_json(line_dir / "parent.current.json", pointer)
     _replace_tree(version / "bundle", line_dir / "parent")
     if (version / "evidence").is_dir():
         _replace_tree(version / "evidence", line_dir / "parent_evidence")
-    _write(line_dir / "parent_scores.json", _read(version / "scores.json"))
+    atomic_json(line_dir / "parent_scores.json", _read(version / "scores.json"))
     lineage = line_dir / "lineage" / "lineage.md"
     lineage.parent.mkdir(parents=True, exist_ok=True)
     if not lineage.exists():
@@ -402,26 +399,11 @@ def _shadowed_review(slot_dir: Path) -> list[str]:
     return _read(path).get("shadowed_modules", []) if path.is_file() else []
 
 
-def _write(path: Path, value) -> None:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
 def _replace_tree(source: Path, destination: Path) -> None:
     if destination.exists():
         writable(destination)
         shutil.rmtree(destination)
     shutil.copytree(source, destination)
-
-
-# ---------------------------------------------------------------------------- evaluation
-def _bundle_hash(bundle: Path) -> str:
-    digest = hashlib.sha256()
-    for path in sorted(Path(bundle).rglob("*")):
-        if path.is_file() and not path.is_symlink():
-            digest.update(str(path.relative_to(bundle)).encode("utf-8"))
-            digest.update(path.read_bytes())
-    return digest.hexdigest()
 
 
 def _eval_fingerprint(config: dict, line: str, *, no_automem: bool = False) -> str:
@@ -436,13 +418,9 @@ def _cached_evaluation(prior: dict, config: dict, line: str, bundle: Path, *,
     if not prior.get("complete"):
         return False
     wanted = config["seeds"]["dev"] if seeds is None else seeds
-    if config["benchmark"]["adapter"] == "vsi_joint":
-        from ..benchmarks3d.joint import expected_units
-        expected = set(expected_units(config))
-    else:
-        expected = {f"{int(seed)}:{rep}{unit_suffix}" for seed in wanted
-                    for rep in range(int(config["noise"]["parent_repetitions"]))}
-    if (prior.get("candidate_hash") != _bundle_hash(bundle)
+    expected = {f"{int(seed)}:{rep}{unit_suffix}" for seed in wanted
+                for rep in range(int(config["noise"]["parent_repetitions"]))}
+    if (prior.get("candidate_hash") != tree_hash(bundle)
             or prior.get("eval_fingerprint") != _eval_fingerprint(config, line, no_automem=no_automem)
             or set(prior.get("expected_units", [])) != expected):
         raise ValueError("completed evaluation identity changed; preserve old evidence and use a new run directory")
@@ -465,7 +443,9 @@ def _episode_efficiency(summary: dict, attempt_dir: Path) -> dict:
                 row = json.loads(raw)
                 value_in, value_out = row.get("input_tokens"), row.get("output_tokens")
                 if type(value_in) in (int, float) and type(value_out) in (int, float):
-                    input_tokens += int(value_in); output_tokens += int(value_out); usage_rows += 1
+                    input_tokens += int(value_in)
+                    output_tokens += int(value_out)
+                    usage_rows += 1
                 for event in row.get("tool_events") or []:
                     if isinstance(event, dict) and event.get("event") == "tool_result":
                         tool_calls += 1
@@ -473,9 +453,7 @@ def _episode_efficiency(summary: dict, attempt_dir: Path) -> dict:
                         by_name[str(event.get("name"))] = by_name.get(str(event.get("name")), 0) + 1
             except json.JSONDecodeError:
                 continue
-    # Upstream's core constraint is that the LLM decides what to store and
-    # retrieve.  An episode in which the LLM invoked no tool at all has
-    # bypassed that; it is labelled here and never gates selection.
+    # Record whether the model used any tool during the episode.
     requests = summary.get("requests")
     have_usage = type(requests) is int and requests > 0 and usage_rows == requests
     success = (False if summary.get("status") in {"candidate_crashed", "candidate_hung"}
@@ -498,16 +476,8 @@ def _evaluate(run_dir: Path, config: dict, line: str, bundle: Path, phase: str, 
               seeds: list | None = None, no_automem: bool = False,
               unit_suffix: str = "", shared_ledger: Ledger | None = None,
               episode_semaphore=None) -> tuple[dict, int]:
-    if config["benchmark"]["adapter"] == "vsi_joint":
-        from ..benchmarks3d.joint import evaluate
-        return evaluate(run_dir, config, line, bundle, phase, out_dir,
-                        fingerprint=_eval_fingerprint(config, line, no_automem=no_automem),
-                        candidate_hash=_bundle_hash(bundle), unit_suffix=unit_suffix)
     bind_runtime(run_dir)
-    # gen2 (2026-10-08): runtime.parallel_units evaluates the development units of one
-    # bundle concurrently, one _evaluate per seed with its own PaidModel and a shared
-    # ledger -- the same pattern as cmd_holdout_eval.  Results are merged into the
-    # single-call shape; units, attempts and evidence paths are unchanged.
+    # Each parallel seed owns a model context and shares the evaluation ledger.
     wanted_parallel = seeds if seeds is not None else config["seeds"]["dev"]
     if config.get("runtime", {}).get("parallel_units") and len(wanted_parallel) > 1:
         shared = shared_ledger or Ledger(run_dir / "ledger.json", config["budget"].get("price_per_million", {}))
@@ -528,17 +498,14 @@ def _evaluate(run_dir: Path, config: dict, line: str, bundle: Path, phase: str, 
         for key in ("requests", "protocol_errors", "fallbacks", "steps"):
             guards[key] += int(summary.get(key, 0))
     outcomes, status = [], "completed"
-    # A completed measurement is immutable.  The old controller removed this
-    # directory on every re-entry, silently turning a resume into a re-test.
-    # Callers persist the summary beside the evidence and only invoke us for
-    # missing units; retain any interrupted attempt as forensic evidence.
+    # Keep interrupted attempts so resume only runs missing units.
     out_dir.mkdir(parents=True, exist_ok=True)
     wanted_seeds = seeds if seeds is not None else config["seeds"]["dev"]
     expected_units = {f"{int(seed)}:{repetition}{unit_suffix}" for seed in wanted_seeds for repetition in range(repetitions)}
-    bundle_digest, fingerprint = _bundle_hash(bundle), _eval_fingerprint(config, line, no_automem=no_automem)
+    bundle_digest, fingerprint = tree_hash(bundle), _eval_fingerprint(config, line, no_automem=no_automem)
     failure_score = (0.0 if config["benchmark"]["adapter"] in {"minigrid_memory", "minigrid_keycorridor"}
                      and config["gate"]["rule"] == "score_then_efficiency" else None)
-    for index, seed in enumerate(wanted_seeds):
+    for seed in wanted_seeds:
         for repetition in range(repetitions):
             unit_id = f"{int(seed)}:{repetition}{unit_suffix}"
             unit_dir = out_dir / "units" / unit_id.replace(":", "_")
@@ -561,8 +528,6 @@ def _evaluate(run_dir: Path, config: dict, line: str, bundle: Path, phase: str, 
                 prior = classify_summary(previous, logical_round_id=f"{line}:{phase}", logical_unit_id=unit_id,
                                          attempt_id=existing[-1].parent.name, candidate_hash=bundle_digest,
                                          eval_fingerprint=fingerprint, candidate_failure_score=failure_score)
-                # Method and authorization outcomes are logical terminal
-                # results: they never get reclassified as a fresh evaluation.
                 if prior.execution_status in {"method_failed", "blocked_budget", "blocked_auth", "blocked_unknown"}:
                     outcomes.append(prior)
                     continue
@@ -570,9 +535,6 @@ def _evaluate(run_dir: Path, config: dict, line: str, bundle: Path, phase: str, 
                     len(outcomes) >= int(authorization["max_units"])):
                 status = "budget_exhausted"
                 break
-            # Formal run (2026-10-13): an infrastructure failure (provider outage, env server death) re-runs
-            # the same unit at once as a new attempt; the failed attempt stays as evidence.  Previously the
-            # whole family waited for the next quick_evo invocation.
             backoff = INFRA_RETRY_BACKOFF if config.get("runtime", {}).get("infra_retry") is True else ()
             for infra_try in range(len(backoff) + 1):
                 attempt_id, attempt_dir = store.begin(bundle_digest, fingerprint)
@@ -606,9 +568,6 @@ def _evaluate(run_dir: Path, config: dict, line: str, bundle: Path, phase: str, 
                 status = "infrastructure_failed"
                 break
             if outcome.execution_status.startswith("blocked_"):
-                # Preserve the controller's established public terminal name;
-                # the nested outcome carries the richer blocked_budget/auth
-                # classification used by selection and audit.
                 status = str(summary.get("status", outcome.execution_status))
                 break
             add_guards(summary)
@@ -627,7 +586,6 @@ def _evaluate(run_dir: Path, config: dict, line: str, bundle: Path, phase: str, 
     return result, 0 if result["status"] == "completed" else 1
 
 
-# ---------------------------------------------------------------------------- workspace values
 def _noise_summary(config: dict, scores: dict) -> str:
     flat = [s for values in scores.values() for s in (values if isinstance(values, list) else [values])]
     if not flat:
@@ -670,7 +628,6 @@ def _contracts(feedback: str = "basic", caps: dict[str, int] | None = None) -> d
     host = ROOT / "host"
     caps = caps or {"LOG": 10, "PLAN": 10}
     limits = VisualLimits()
-    # The basic arm of the feedback ablation must not see the prediction schema.
     extra = {"predictions_schema.md": PREDICTION_SCHEMA} if feedback == "enhanced" else {}
     return {**extra,
         "registry.py": (host / "child" / "registry.py").read_text(encoding="utf-8"),
@@ -700,14 +657,13 @@ def _visual_limits_text() -> str:
             f"only frames already observed in this episode; the image arrives, labelled, with the next model request")
 
 
-# ---------------------------------------------------------------------------- commands
 def cmd_prepare(args) -> tuple[dict, int]:
     config = load_config(args.config)
     run_dir = args.run_dir.resolve()
     if run_dir.exists() and any(run_dir.iterdir()):
         raise FileExistsError("run directory must be empty")
     run_dir.mkdir(parents=True, exist_ok=True)
-    _write(run_dir / "config.json", config)
+    atomic_json(run_dir / "config.json", config)
     Ledger(run_dir / "ledger.json", config["budget"].get("price_per_million", {})).add()
     result = {"status": "prepared", "run_dir": str(run_dir), "mde": _mde(config, None),
               "runtime_mode": config["runtime"]["mode"]}
@@ -735,7 +691,7 @@ def cmd_parent_eval(args) -> tuple[dict, int]:
         if _cached_evaluation(prior, config, args.line, _parent_bundle(line_dir)):
             return {**prior, "reused": True, "mde": _mde(config, prior.get("scores"))}, 0
     result, code = _evaluate(run_dir, config, args.line, _parent_bundle(line_dir), "parent-eval", line_dir / "parent_evidence")
-    _write(line_dir / "parent_scores.json", result)
+    atomic_json(line_dir / "parent_scores.json", result)
     if result.get("complete") and config["gate"].get("parent_remeasure", False):
         _record_measurement(line_dir, _parent_bundle(line_dir), "G0", result)
         _store_version(line_dir, _parent_bundle(line_dir), line_dir / "parent_evidence", result)
@@ -775,9 +731,7 @@ def cmd_meta_workspace(args) -> tuple[dict, int]:
     _sync_feedback_to_lineage(line_dir)
     prior_evidence = None
     if args.slot == "revision":
-        # The revision prompt points the Meta at the fresh attempt of this
-        # generation.  A fresh slot that failed before collect has no lineage
-        # documents yet; project its host status so the pointer is never empty.
+        # Include the fresh slot’s failure status even if no program was collected.
         fresh = _slot(run_dir, args.line, args.generation, "fresh")
         prior_documents = line_dir / "lineage" / f"g{int(args.generation)}_fresh"
         if not (prior_documents / "status.json").exists() and (fresh / "status.json").exists():
@@ -808,7 +762,7 @@ def cmd_meta_workspace(args) -> tuple[dict, int]:
     record = {"workspace": str(workspace)}
     if config["meta"].get("evidence_images", True) is False:
         record["images_withheld"] = _withhold_images(workspace)
-    _write(_slot(run_dir, args.line, args.generation, args.slot) / "workspace.json", record)
+    atomic_json(_slot(run_dir, args.line, args.generation, args.slot) / "workspace.json", record)
     return {"workspace": str(workspace)}, 0
 
 
@@ -837,7 +791,7 @@ def _image_magic(path: Path) -> bool:
 
 
 def _withhold_images(workspace: Path) -> int:
-    """V no-image ablation (2026-10-12): the Meta of this run gets the same evidence minus every image file."""
+    """Remove image evidence when the manifest requests a text-only revision workspace."""
     inputs = Path(workspace) / "input"
     writable(inputs)
     removed = 0
@@ -854,24 +808,23 @@ def _withhold_images(workspace: Path) -> int:
     return removed
 
 
-# Backstop for the host's smoke replay of a collected candidate (the old limit was 30 minutes).
 REPLAY_BACKSTOP_SECONDS = 2 * 3600
 
 
-def _host_replay(candidate: Path, parent: Path, evidence: Path, line: str, output: Path) -> dict:
-    with tempfile.TemporaryDirectory(prefix="v8-host-replay-") as tmp:
+def _host_replay(candidate: Path, parent: Path, evidence: Path, line: str, output: Path, mode: str) -> dict:
+    with tempfile.TemporaryDirectory(prefix="evovim-host-replay-") as tmp:
         replay = Path(tmp) / "replay"
         install_replay(replay)
         try:
             process = subprocess.run([sys.executable, "-B", str(replay / "replay_main.py"), "--candidate", str(candidate),
                                       "--parent", str(parent), "--evidence", str(evidence), "--line", line,
-                                      "--output", str(output)], capture_output=True, text=True,
+                                      "--output", str(output), "--mode", mode], capture_output=True, text=True,
                                      timeout=REPLAY_BACKSTOP_SECONDS)
         except subprocess.TimeoutExpired:
             # The replay's worker exits on its own once its parent is gone.
             return {"crashed": True, "status": "replay_hung",
                     "traceback": f"host replay ran for more than {REPLAY_BACKSTOP_SECONDS} s (backstop against infinite loops)"}
-    if not output.exists():
+    if process.returncode or not output.exists():
         return {"crashed": True, "status": "replay_failed", "traceback": process.stderr[-4000:]}
     return _read(output)
 
@@ -919,7 +872,7 @@ def _record_attempt(line_dir: Path, generation: int, slot: str, workspace: Path,
         if (documents / "revised_code").exists():
             shutil.rmtree(documents / "revised_code")
         shutil.copytree(revised, documents / "revised_code", ignore=shutil.ignore_patterns("__pycache__"))
-    _write(documents / "status.json", result)
+    atomic_json(documents / "status.json", result)
 
 
 def record_terminal(line_dir: Path, generation: int, slot: str, result: dict,
@@ -998,7 +951,7 @@ def cmd_collect(args) -> tuple[dict, int]:
         result["meta_state"] = state_note
         if predictions is not None:
             result["predictions"] = predictions
-        _write(slot_dir / "status.json", result)
+        atomic_json(slot_dir / "status.json", result)
         _record_attempt(line_dir, args.generation, args.slot, workspace, result,
                         enhanced=_feedback_mode(config) == "enhanced")
         if code:
@@ -1011,17 +964,14 @@ def cmd_collect(args) -> tuple[dict, int]:
             "shadowed_modules": _shadowed_review(slot_dir),
             "evidence_refs": [f"lineage/g{int(args.generation)}_{args.slot}"],
         })
-        _write(slot_dir / "host_feedback.json", feedback)
+        atomic_json(slot_dir / "host_feedback.json", feedback)
         _sync_feedback_to_lineage(line_dir)
         return result, code
 
     if not overlay:
         return finish({"status": "invalid_output", "reason": "output/revised_code contains no Python files"}, 1)
-    # No environment-name blocklist is supplied: A1 removed that rejection and
-    # review_candidate ignores the argument.  Passing registered_adapters() here
-    # read as if the check were still live when it is not.
     review = review_candidate(_parent_bundle(line_dir), workspace / "output" / "revised_code", line=args.line)
-    _write(slot_dir / "review.json", review)
+    atomic_json(slot_dir / "review.json", review)
     if not review["passed"]:
         return finish({"status": "review_failed", "review": review}, 1)
     if (slot_dir / "bundle").exists():
@@ -1029,7 +979,7 @@ def cmd_collect(args) -> tuple[dict, int]:
         shutil.rmtree(slot_dir / "bundle")
     bundle = install_bundle(slot_dir / "bundle", _parent_bundle(line_dir), overlay)
     replay = _host_replay(workspace / "output" / "revised_code", _parent_bundle(line_dir), _parent_evidence(line_dir),
-                          args.line, slot_dir / "replay_report.json")
+                          args.line, slot_dir / "replay_report.json", config["runtime"]["mode"])
     if replay.get("crashed"):
         return finish({"status": "smoke_failed", "replay": {k: replay.get(k) for k in ("status", "traceback", "steps")}}, 1)
     result = {"status": "installed", "bundle": str(bundle), "changed_files": sorted(overlay),
@@ -1085,12 +1035,11 @@ def cmd_candidate_eval(args) -> tuple[dict, int]:
                     remeasure, parent_code = parent_future.result()
                     candidate_result = candidate_future.result()
             else:
-                # Reference path used by the parity test; production always runs the pair concurrently.
                 remeasure, parent_code = _evaluate(*parent_args, **parent_kwargs)
                 if not parent_code:
                     candidate_result = _evaluate(*candidate_args, **eval_kwargs)
             remeasure["version_hash"] = parent_hash
-            _write(out / "scores.json", remeasure)
+            atomic_json(out / "scores.json", remeasure)
             if parent_code:
                 return remeasure, parent_code
         _record_measurement(line_dir, parent_bundle, f"g{int(args.generation)}", remeasure)
@@ -1099,7 +1048,7 @@ def cmd_candidate_eval(args) -> tuple[dict, int]:
     else:
         remeasure_evidence = None
     result, code = candidate_result if candidate_result is not None else _evaluate(*candidate_args, **eval_kwargs)
-    _write(slot_dir / "scores.json", result)
+    atomic_json(slot_dir / "scores.json", result)
     if _feedback_mode(config) == "enhanced":
         # lineage/ is the only directory later workspaces receive; the raw
         # candidate evidence stays host-side, so project a readable digest.
@@ -1107,14 +1056,13 @@ def cmd_candidate_eval(args) -> tuple[dict, int]:
         write_episode_digest(slot_dir / "evidence", documents)
         _write_contact_sheets(slot_dir / "evidence", documents / "contact_sheets")
         if remeasure_evidence is not None:
-            # The parent's latest episode on the same seed, next to the candidate's.
             write_episode_digest(remeasure_evidence, documents / "parent_remeasure")
             _write_contact_sheets(remeasure_evidence, documents / "parent_remeasure" / "contact_sheets")
     feedback = finalize_feedback(_line(run_dir, args.line), f"g{int(args.generation)}_{args.slot}", "candidate_eval", {
         "verdict": "evaluation_failed" if code else "evaluated", "accepted": False,
         "score_valid": bool(result.get("scores_complete")), "evaluation": result,
         "evidence_refs": [str((slot_dir / "evidence").relative_to(_line(run_dir, args.line)))]})
-    _write(slot_dir / "host_feedback.json", feedback)
+    atomic_json(slot_dir / "host_feedback.json", feedback)
     _sync_feedback_to_lineage(_line(run_dir, args.line))
     return result, code
 
@@ -1127,16 +1075,34 @@ def cmd_gate(args) -> tuple[dict, int]:
     prior_gate = slot_dir / "gate.json"
     if prior_gate.exists():
         return {**_read(prior_gate), "reused": True}, 0
+    comparison_id = f"g{int(args.generation)}_{args.slot}"
+    promotion = Promotion(line_dir)
+    remeasure_enabled = config["gate"].get("parent_remeasure", False)
+
+    def publish_parent():
+        record = promotion.commit(comparison_id)
+        version = record["version"]
+        bundle = line_dir / version["bundle"]
+        scores = _read(line_dir / version["scores"])
+        if remeasure_enabled:
+            _record_measurement(line_dir, bundle, comparison_id, scores)
+        _replace_tree(bundle, line_dir / "parent")
+        _replace_tree(line_dir / version["evidence"], line_dir / "parent_evidence")
+        atomic_json(line_dir / "parent_scores.json", scores)
+        return record["verdict"]
+
+    # Finish an interrupted promotion using the original gate decision.
+    if (promotion.journal / f"{comparison_id}.json").is_file():
+        result = publish_parent()
+        atomic_json(prior_gate, result)
+        return result, 0
     parent_initial, candidate = _parent_scores(line_dir), _read(slot_dir / "scores.json")
     reference_bundle, reference_evidence = _parent_bundle(line_dir), _parent_evidence(line_dir)
-    remeasure_enabled = config["gate"].get("parent_remeasure", False)
     parent, parent_n = (_measured_parent(line_dir, reference_bundle, parent_initial)
                         if remeasure_enabled else (parent_initial, 1))
     derived_from, derived_n = parent, parent_n  # the parent this candidate was built on
     reference_id = None
     if _reference_is_best(config):
-        # Compare with the best measured version, not only the current parent:
-        # a parent whose remeasured mean fell would otherwise lower the bar.
         best = _best_version(line_dir, rule=config["gate"]["rule"], current_hash=tree_hash(_parent_bundle(line_dir)))
         if best is not None and best["hash"] != tree_hash(_parent_bundle(line_dir)):
             first = _read(best["path"] / "measurements.json")["measurements"][0]["result"]
@@ -1145,7 +1111,7 @@ def cmd_gate(args) -> tuple[dict, int]:
         reference_id = best["first_id"] if best else None
     candidate["efficiency"] = efficiency(parent_initial.get("episode_efficiency", {}), candidate.get("episode_efficiency", {}),
                                          set(parent.get("expected_units", [])))
-    _write(slot_dir / "scores.json", candidate)
+    atomic_json(slot_dir / "scores.json", candidate)
     if not parent.get("selection_eligible", parent.get("complete")) or not candidate.get("selection_eligible", candidate.get("complete")):
         result = {"accepted": False, "status": "not_comparable", "reason": "incomplete evaluation",
                   "rule": config["gate"]["rule"], "difference": None, "detail": {}}
@@ -1179,7 +1145,6 @@ def cmd_gate(args) -> tuple[dict, int]:
     if reference_id is not None:
         result["reference_version"] = reference_id
     result["reference_hash"] = tree_hash(reference_bundle)
-    comparison_id = f"g{int(args.generation)}_{args.slot}"
     if _feedback_mode(config) == "enhanced":
         records_path = _measurement_path(line_dir, reference_bundle)
         write_gate_comparison(parent, candidate, reference_evidence, slot_dir / "evidence",
@@ -1187,28 +1152,14 @@ def cmd_gate(args) -> tuple[dict, int]:
                               _read(records_path).get("measurements", []) if records_path.exists() else [])
     parent_before = {"version_hash": tree_hash(_parent_bundle(line_dir)), "scores": str(line_dir / "parent_scores.json"),
                      "eval_fingerprint": parent.get("eval_fingerprint")}
-    if result.get("accepted"):
-        promotion = Promotion(line_dir)
-        if promotion.current() is None:
-            atomic_repair_json(line_dir / "parent.current.json", parent_before)
-        promotion.stage(comparison_id, parent_before, slot_dir / "bundle", slot_dir / "evidence", candidate, result)
-        promotion.commit(comparison_id)
-        if remeasure_enabled:
-            _record_measurement(line_dir, slot_dir / "bundle", comparison_id, candidate)
-        # Compatibility projections are refreshed only after the durable
-        # pointer publication. All active consumers resolve the pointer.
-        _replace_tree(slot_dir / "bundle", line_dir / "parent")
-        _replace_tree(slot_dir / "evidence", line_dir / "parent_evidence")
-        _write(line_dir / "parent_scores.json", candidate)
-    _write(slot_dir / "gate.json", result)
-    _write(line_dir / "lineage" / f"g{int(args.generation)}_{args.slot}" / "gate.json", result)
+    atomic_json(line_dir / "lineage" / f"g{int(args.generation)}_{args.slot}" / "gate.json", result)
     feedback = finalize_feedback(line_dir, comparison_id, "gate", {
         "verdict": "accepted" if result.get("accepted") else "rejected", "accepted": bool(result.get("accepted")),
         "score_valid": bool(candidate.get("scores_complete")), "gate": result,
         "candidate_hash": candidate.get("candidate_hash"), "parent_before_hash": parent_before["version_hash"],
         "evidence_refs": [str((slot_dir / "evidence").relative_to(line_dir))],
         "missing_evidence": candidate.get("missing_units", [])})
-    _write(slot_dir / "host_feedback.json", feedback)
+    atomic_json(slot_dir / "host_feedback.json", feedback)
     _sync_feedback_to_lineage(line_dir)
     lineage = line_dir / "lineage" / "lineage.md"
     lineage.parent.mkdir(parents=True, exist_ok=True)
@@ -1230,8 +1181,8 @@ def cmd_gate(args) -> tuple[dict, int]:
         outcome = score_predictions(lock_predictions(slot_dir / "predictions.json"), derived_from, candidate, band)
         if remeasure_enabled:
             outcome["parent_n"] = parent_n
-        _write(slot_dir / "prediction_outcome.json", outcome)
-        _write(line_dir / "lineage" / comparison_id / "prediction_outcome.json", outcome)
+        atomic_json(slot_dir / "prediction_outcome.json", outcome)
+        atomic_json(line_dir / "lineage" / comparison_id / "prediction_outcome.json", outcome)
         append_prediction_table(line_dir / "lineage", comparison_id, outcome, verdict=verdict)
     parent_count_note = f"; parent n={parent_n}" if remeasure_enabled and not noise_note else ""
     shadowed_note = f"shadowed_modules: {_shadowed_review(slot_dir)}; "
@@ -1243,6 +1194,10 @@ def cmd_gate(args) -> tuple[dict, int]:
     if line_text not in lineage.read_text(encoding="utf-8"):
         with lineage.open("a", encoding="utf-8") as stream:
             stream.write(line_text)
+    if result.get("accepted"):
+        promotion.stage(comparison_id, parent_before, slot_dir / "bundle", slot_dir / "evidence", candidate, result)
+        publish_parent()
+    atomic_json(prior_gate, result)
     return result, 0
 
 
@@ -1317,7 +1272,7 @@ def cmd_holdout_eval(args) -> tuple[dict, int]:
     result["per_seed_status"] = {str(seed): part.get("status") for seed, part in zip(seeds, parts)}
     result["which"] = args.which
     result["bundle_hash"] = tree_hash(bundle)
-    _write(out / "scores.json", result)
+    atomic_json(out / "scores.json", result)
     return result, 0 if result["status"] == "completed" else 1
 
 

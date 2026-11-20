@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shlex
 import shutil
 import sys
 import uuid
@@ -19,6 +20,8 @@ REGISTERED_PRIORS = PACKAGE / "docs" / "REGISTERED_PRIORS.md"
 REPLAY_MAIN = PACKAGE / "meta" / "replay" / "replay_main.py"
 REPLAY_HOST_FILES = ("bundle.py", "dto.py", "model.py", "protocol_text.py", "visual_channel.py",
                      "worker_process.py", "child/worker_main.py", "child/registry.py")
+
+
 def evaluation_python() -> Path:
     """Use the same interpreter for host episodes and Meta's offline replay."""
     return Path(sys.executable).absolute()
@@ -26,8 +29,7 @@ def evaluation_python() -> Path:
 
 EVIDENCE_FILES = ("trajectory.jsonl", "calls.jsonl", "model_requests.jsonl", "episode.json", "summary.json")
 EVIDENCE_DIRS = ("frames", "final_memory", "memory_by_step", "model_images", "memory_blobs", "memory_manifests")
-# Agent-written notes (RNG 2026-10-10): only the secret-value scan applies; their key names are the
-# agent's own choice (e.g. "coordinates", public in Matching Pairs) and may be free text.
+# Agents choose their own memory keys. Scan their values for credentials.
 AGENT_MEMORY_DIRS = {"final_memory", "memory_by_step", "memory_blobs"}
 
 
@@ -35,8 +37,7 @@ class EvidencePrivacyError(RuntimeError):
     pass
 
 
-# Exact key names of private adapter state (Crafter info, gridmemory private record) and credentials.
-# Exact matching avoids rejecting candidate-chosen names such as a memory file called "seed_map.txt".
+# Match exact private adapter field names.
 PRIVATE_KEYS = {"semantic", "player_pos", "player_facing", "view", "target", "private_record", "private",
                 "secret", "secret_truth", "seed", "coordinates", "password", "api_key", "access_token"}
 PRIVATE_VALUE = re.compile(r"(sk-[A-Za-z0-9]{20,}|minimax[_-]?api[_-]?key|anthropic[_-]?api[_-]?key)", re.I)
@@ -65,10 +66,7 @@ def scan_evidence(root: Path) -> None:
             continue
         if path.suffix == ".json":
             try:
-                # Tool contracts are declarative schemas.  Their conventional
-                # argument name \"target\" is not a leaked environment target.
-                # Keep secret-value scanning above, but do not apply game-state
-                # key-name checks to this registered documentation artifact.
+                # Tool schema keys describe argument names such as target.
                 if path.name != "tool_contracts.json":
                     _walk_keys(json.loads(text), path)
             except json.JSONDecodeError:
@@ -140,13 +138,23 @@ def copy_evidence(source: Path, destination: Path) -> None:
 def install_replay(destination: Path) -> None:
     """A self-contained replay: the runner plus a private copy of the host runtime package."""
     host = PACKAGE / "host"
-    package = destination / "v8host"
+    package = destination / "replay_host"
     (package / "child").mkdir(parents=True, exist_ok=True)
     (package / "__init__.py").write_text("")
     (package / "child" / "__init__.py").write_text("")
     for name in REPLAY_HOST_FILES:
         shutil.copyfile(host / name, package / name)
     shutil.copyfile(REPLAY_MAIN, destination / "replay_main.py")
+
+
+def replay_command(workspace: Path, line: str) -> str:
+    """Build a shell command that also works from the revision model's output directory."""
+    workspace = workspace.resolve()
+    inputs, output = workspace / "input", workspace / "output"
+    args = [evaluation_python(), inputs / "replay" / "replay_main.py",
+            "--candidate", output / "revised_code", "--parent", inputs / "source",
+            "--evidence", inputs / "evidence", "--line", line, "--output", output / "replay_report.json"]
+    return shlex.join(map(str, args))
 
 
 def readonly(root: Path) -> None:
@@ -182,8 +190,6 @@ def build_workspace(root: Path, *, line: str, generation: int, slot: str, source
                     feedback: str = "basic", prior_evidence: Path | None = None,
                     visual: bool = False) -> Path:
     root = Path(root).resolve()
-    if not str(root).isascii() or not root.is_absolute():
-        raise ValueError("workspace root must be an absolute ASCII path")
     home = Path.home().resolve()
     if root == home or home in root.parents:
         raise ValueError("workspace root must be outside the home directory")
@@ -199,8 +205,6 @@ def build_workspace(root: Path, *, line: str, generation: int, slot: str, source
     if not (inputs / "lineage" / "lineage.md").exists():
         (inputs / "lineage" / "lineage.md").write_text("# Lineage\n\nNo earlier candidates.\n")
     if prior_evidence is not None and Path(prior_evidence).is_dir():
-        # Revision slot: the fresh attempt's own development episodes, through
-        # the same whitelist copy and privacy scan as the parent's evidence.
         copy_evidence(prior_evidence, inputs / "lineage" / f"g{generation}_fresh" / "evidence")
     (inputs / "meta_state").mkdir()
     playbook = "(empty)"
@@ -211,27 +215,18 @@ def build_workspace(root: Path, *, line: str, generation: int, slot: str, source
     (inputs / "contracts").mkdir()
     for name, text in contracts.items():
         (inputs / "contracts" / name).write_text(text, encoding="utf-8")
+    interpreter = shlex.quote(str(evaluation_python()))
     (inputs / "contracts" / "meta_environment.md").write_text(
-        "# Meta evaluation environment\n\n"
-        f"Use `{evaluation_python()}` for analysis scripts and offline replay.\n"
-        "This interpreter already has numpy, scipy, Pillow, and omegaconf installed.\n"
-        "Do not place substitutes for third-party or Python standard-library modules "
-        "inside `output/revised_code/`.\n\n"
-        "# Sandboxed validation commands\n\n"
-        "For a long analysis or validation script, first create a stub with separate "
-        "single-line Bash calls: `mkdir -p output/validation` and "
-        "`printf 'pass\\n' > output/validation/check.py`. Then use Edit to write a `.py` file "
-        "under `output/validation/` or `output/meta_state/toolkit/`, then run it "
-        f"with a single-line Bash command such as `{evaluation_python()} output/validation/check.py`.\n"
-        "Use paths relative to this workspace for script arguments and output files. "
-        "Use Read for input evidence. Avoid shell heredocs, pipelines that write files, "
-        "multiline `python -c`, and writes outside `output/`: these often enter "
-        "Claude Code's dontAsk permission path instead of its sandbox auto-allow path.\n",
+        "# Offline evaluation\n\n"
+        f"Run validation scripts with `{interpreter}`. The environment includes "
+        "numpy, scipy, Pillow and omegaconf. Keep analysis scripts under "
+        f"`{workspace / 'output' / 'validation'}` or `{workspace / 'output' / 'meta_state' / 'toolkit'}`. "
+        "Place only candidate source files in revised_code/.\n",
         encoding="utf-8")
     install_replay(inputs / "replay")
-    (workspace / "output").mkdir()
-    command = (f"{evaluation_python()} input/replay/replay_main.py --candidate output/revised_code --parent input/source "
-               f"--evidence input/evidence --line {line} --output output/replay_report.json")
+    output = workspace / "output"
+    output.mkdir()
+    command = replay_command(workspace, line)
     filled = dict(values)
     filled.update(LINE=line, GENERATION=generation, SLOT_KIND=slot, PROMPT_ID=digest[:12], WORKSPACE=workspace,
                   CODEBASE_DIR=inputs / "source", EVIDENCE_DIR=inputs / "evidence", LINEAGE_DIR=inputs / "lineage",

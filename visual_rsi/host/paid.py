@@ -1,4 +1,4 @@
-"""Authorized, budget-capped model for paid evaluation (ported from r2 reserve/settle accounting)."""
+"""Authorized, budget-capped model for paid evaluation."""
 from __future__ import annotations
 
 import copy
@@ -12,8 +12,8 @@ import time
 from typing import Any
 import uuid
 
-from .episode import BudgetExhausted
-from .model import ModelCall, ModelReply
+from . import transport
+from .model import BudgetExhausted, ModelCall, ModelReply
 
 AUTH_KEYS = {"batch_id", "phase", "max_units", "max_input_tokens", "max_output_tokens", "max_amount"}
 IMAGE_RESERVATION = 8192
@@ -70,12 +70,7 @@ class Ledger:
     ATTEMPT_FIELDS = ("reserved_attempts", "settled_attempts", "unknown_attempts",
                       "reserved_input_tokens", "reserved_output_tokens", "estimated_cost_yuan")
 
-    # One object per ledger file in this process.  Evaluations of the same
-    # environment run in parallel threads (paired remeasure, holdout seeds and
-    # versions, final remeasure); separate objects each held their own counts
-    # and overwrote each other's file, and shared one temp name, so a
-    # concurrent rename failed the episode.  Every caller now shares one
-    # object, one lock and one in-memory state.
+    # Concurrent evaluations of a run share its ledger and reservation lock.
     _instances: dict[Path, "Ledger"] = {}
     _instances_lock = threading.Lock()
 
@@ -84,18 +79,12 @@ class Ledger:
         with cls._instances_lock:
             instance = cls._instances.get(key)
             if instance is None:
-                # Keep the in-process ledger identity stable even if a concurrent
-                # filesystem check briefly observes no destination during a write.
-                # A new run must use its own run directory and ledger path.
                 instance = super().__new__(cls)
                 instance._initialised = False
                 cls._instances[key] = instance
             return instance
 
     def __init__(self, path: Path, price: dict[str, float]):
-        # __new__ publishes the shared object before Python calls __init__.
-        # Initialise it under the registry lock so a second evaluation thread
-        # cannot receive a half-built ledger.
         with self._instances_lock:
             if self._initialised:
                 return
@@ -275,14 +264,8 @@ class Ledger:
 class PaidModel:
     def __init__(self, config: dict, authorization: dict, ledger: Ledger, requests_log: Path,
                  exchange_log: Path | None = None):
-        import importlib
-        transport = importlib.import_module(__package__ + ".transport")
-        self.transport = transport
-        self.sender = transport.make_sender(config)  # attribute lookup at call time: tests can substitute it
+        self.sender = transport.make_sender(config)
         self.config, self.auth, self.ledger = config, authorization, ledger
-        # Direct offline tests historically constructed PaidModel with only
-        # token/amount caps. Production authorization still requires batch_id
-        # through load_authorization().
         self.batch_id = str(authorization.get("batch_id", "legacy-offline-test"))
         self.requests_log = Path(requests_log)
         self.exchange_log = Path(exchange_log) if exchange_log is not None else None
@@ -290,9 +273,6 @@ class PaidModel:
         amount = budget.get("amount")
         self.run_caps = {"input": int(budget.get("input_tokens", 0)) or None,
                          "output": int(budget.get("output_tokens", 0)) or None,
-                         # Exploratory runs intentionally use a null monetary
-                         # cap while retaining hard token caps.  Do not coerce
-                         # that explicit null through float().
                          "amount": None if amount is None else (float(amount) or None)}
         self.active_unit_id: str | None = None
         self.active_attempt_id: str | None = None
@@ -340,18 +320,16 @@ class PaidModel:
             for image, label in zip(call.images, labels):
                 if label:
                     parts.append({"type": "text", "text": label})
-                parts.append({"type": "image_url", "image_url": {"url": self.transport.image_data_url(image)}})
+                parts.append({"type": "image_url", "image_url": {"url": transport.image_data_url(image)}})
             if messages and messages[-1]["role"] == "user":
                 messages[-1]["content"] = [{"type": "text", "text": messages[-1]["content"]}, *parts]
             else:
                 messages.append({"role": "user", "content": [{"type": "text", "text": "Attached images."}, *parts]})
         payload = {"model": model["name"], "messages": messages,
                    "max_completion_tokens": int(model.get("max_completion_tokens", 4096))}
-        if model.get("provider") == "openai":
-            if model.get("reasoning_effort") is not None:
+        if model.get("provider") in {"openai", "anthropic"}:
+            if model["provider"] == "openai" and model.get("reasoning_effort") is not None:
                 payload["reasoning_effort"] = model["reasoning_effort"]
-            # Provider-specific switches for OpenAI-compatible endpoints, e.g. Volcengine
-            # Ark needs {"thinking": {"type": "disabled"}} to match the no-reasoning inner setting.
             payload.update(dict(model.get("extra_body") or {}))
         else:
             payload.update(temperature=float(model.get("temperature", 0.1)),

@@ -1,2 +1,3 @@
-include examples/gridmemory.yaml
-include tests/test_campaign.py
+recursive-include examples *.txt *.yaml *.md
+recursive-include tests *.py
+recursive-include docs/assets *.png *.svg

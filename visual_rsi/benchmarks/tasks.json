@@ -1,0 +1,44 @@
+{
+  "card-matching": {
+    "adapter": "rngbench",
+    "task_id": "matching_pairs/noise_12x12",
+    "max_steps": 360,
+    "dev_seeds": [42, 46],
+    "holdout_seeds": [47, 48, 49, 52, 53]
+  },
+  "dmv-hard": {
+    "adapter": "dmvhard2",
+    "task_id": "dmv_hard2/j5_v20_p6",
+    "max_steps": 124,
+    "dev_seeds": [42, 46],
+    "holdout_seeds": [43, 44, 45, 47, 48, 49, 52, 53, 54, 55]
+  },
+  "minecraft-gallery": {
+    "adapter": "mcgallery",
+    "task_id": "mc_gallery/g8_q8_c12p3",
+    "max_steps": 60,
+    "dev_seeds": [42, 46],
+    "holdout_seeds": [43, 44, 45, 47, 48, 49, 52, 53, 54, 55]
+  },
+  "pac-man": {
+    "adapter": "gameworld",
+    "task_id": "23_pacman/23_05",
+    "max_steps": 100,
+    "dev_seeds": [42, 46],
+    "holdout_seeds": [43, 44, 45, 47, 48]
+  },
+  "poster-maze": {
+    "adapter": "postermaze",
+    "task_id": "poster_maze/n9_k16_q8_g6p3",
+    "max_steps": 140,
+    "dev_seeds": [42, 46],
+    "holdout_seeds": [43, 44, 45, 47, 48, 49, 52, 53, 54, 55]
+  },
+  "tetris": {
+    "adapter": "gameworld",
+    "task_id": "29_tetris/29_05",
+    "max_steps": 100,
+    "dev_seeds": [42, 46],
+    "holdout_seeds": [43, 44, 45, 47, 48]
+  }
+}

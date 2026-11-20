@@ -117,9 +117,7 @@ def gate_candidate(parent: dict, candidate: dict, *, rule: str | None, delta_min
                 "detail": {}, "tie_rule": "retain parent"}
     deltas = [c - p for p, c in pairs]
     difference = statistics.mean(deltas)
-    # Per-unit regression guard (gen2, 2026-10-08): with several development units
-    # (seeds or levels) a candidate may not buy a gain on one unit with a clear loss
-    # on another.  None disables the guard (the pre-gen2 behaviour).
+    # The optional guard limits the worst individual development-unit regression.
     worst_unit_delta = min(deltas)
     unit_guard_ok = unit_regression_max is None or worst_unit_delta >= -float(unit_regression_max) - 1e-12
     passed_rule = False
