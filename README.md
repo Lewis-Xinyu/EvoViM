@@ -7,6 +7,7 @@
 <p align="center"><strong>Recursively Self-Evolving Visual Agents for Exploration with Deferred Queries</strong></p>
 
 <p align="center">
+  <a href="https://evovim.github.io/">Project Website</a> ·
   <a href="#quickstart">Quickstart</a> ·
   <a href="#reproduce-a-benchmark">Benchmarks</a> ·
   <a href="EvoViM/programs/catalog.json">Programs</a> ·
