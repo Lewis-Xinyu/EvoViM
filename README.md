@@ -18,9 +18,7 @@
 
 ## Video walkthrough
 
-[![Watch the EvoViM paper walkthrough (4 min 26 sec)](docs/assets/video-poster.jpg)](https://evovim.github.io/#overview-film)
-
-[▶ Watch with English or Chinese subtitles](https://evovim.github.io/#overview-film) · [Open the MP4](https://evovim.github.io/media/paper-film/evovim.mp4)
+https://github.com/user-attachments/assets/a86e5550-c8bf-4924-8c41-fa747683820b
 
 ## Quickstart
 
