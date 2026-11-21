@@ -16,6 +16,12 @@
 
 **EvoViM evolves Python tools for visual memory.** An agent can save a painting it passes and later match a crop to the doorway where it saw it. Try one of 18 selected programs across three models and six benchmarks.
 
+## Video walkthrough
+
+[![Watch the EvoViM paper walkthrough (4 min 26 sec)](docs/assets/video-poster.jpg)](https://evovim.github.io/#overview-film)
+
+[▶ Watch with English or Chinese subtitles](https://evovim.github.io/#overview-film) · [Open the MP4](https://evovim.github.io/media/paper-film/evovim.mp4)
+
 ## Quickstart
 
 **Python 3.10+ · macOS or Linux · No API key.** From the root of this repository, install EvoViM and play four cards with the evolved Card Matching program.
