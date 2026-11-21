@@ -113,7 +113,7 @@ Each prefix has programs for `card-matching`, `dmv-hard`, `minecraft-gallery`, `
 
 During an episode, a frozen model uses a Python memory program to store observations, recall evidence and choose actions. Between generations, a revision model reads development traces and edits that program. An evaluation determines which version becomes the next parent.
 
-[![Task execution and memory evolution. A frozen model uses visual memory during an episode. Development traces guide edits to the Python program, and a selection rule decides which revision to retain.](docs/assets/framework.svg)](docs/assets/framework.svg)
+[![EvoViM framework from the paper. The agent records observations and consults its memory program during task execution. During memory evolution, the same frozen model revises the program and its revision experience, including the playbook, notes and scripts. Code checks and a development-score gate select the next parent.](docs/assets/framework.svg)](docs/assets/framework.svg)
 
 ### Evolve your own program
 
