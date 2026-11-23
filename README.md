@@ -19,7 +19,7 @@
 
 ## Video walkthrough
 
-https://github.com/user-attachments/assets/a86e5550-c8bf-4924-8c41-fa747683820b
+https://github.com/user-attachments/assets/db6fc378-7951-46a3-ba4c-1a3631a23e6c
 
 ## Quickstart
 
