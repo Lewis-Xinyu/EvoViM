@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="https://evovim.github.io/">Project Website</a> ·
+  <a href="https://huggingface.co/evovim">Datasets on Hugging Face</a> ·
   <a href="#quickstart">Quickstart</a> ·
   <a href="#reproduce-a-benchmark">Benchmarks</a> ·
   <a href="EvoViM/programs/catalog.json">Programs</a> ·
@@ -51,6 +52,14 @@ python -m unittest discover -s tests -v
 The suite checks all released program hashes, visual retrieval, benchmark execution, candidate selection, held-out evaluation and interrupted-run recovery.
 
 </details>
+
+## Datasets
+
+| Dataset | Contents |
+| --- | --- |
+| [Programs and evaluation](https://huggingface.co/datasets/evovim/EvoViM-Research-Data) | 18 final memory programs, revision notes and patches, and scores for 810 held-out episodes. |
+| [Visual trajectories](https://huggingface.co/datasets/evovim/EvoViM-Visual-Trajectories) | 86,913 step observations, image references for each model request, and 8,660 distinct released images. |
+| [Memory traces](https://huggingface.co/datasets/evovim/EvoViM-Memory-Traces) | Step-by-step memory changes and tool calls, plus text and visual retrieval results for the same 240 DMV-Hard questions. |
 
 ## Reproduce a benchmark
 
