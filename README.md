@@ -7,6 +7,7 @@
 <p align="center"><strong>Recursively Self-Evolving Visual Agents for Exploration with Deferred Queries</strong></p>
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2611.28574">Paper (arXiv)</a> ·
   <a href="https://evovim.github.io/">Project Website</a> ·
   <a href="https://huggingface.co/evovim">Datasets on Hugging Face</a> ·
   <a href="#quickstart">Quickstart</a> ·
